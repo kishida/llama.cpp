@@ -10015,6 +10015,40 @@ kernel void kernel_diag_f32(
     }
 }
 
+// src0: x       [n_embd, hc, n_tokens]
+// src1: weights [hc, n_tokens]
+// dst:           [n_embd, n_tokens]
+//   dst[i0, it] = sum_ih x[i0, ih, it]*weights[ih, it]
+//
+// one threadgroup per token, threads stride over n_embd
+kernel void kernel_dsv4_hc_pre_f32(
+        constant ggml_metal_kargs_dsv4_hc_pre & args,
+        device   const char * src0,
+        device   const char * src1,
+        device         char * dst,
+        uint3   tgpig[[threadgroup_position_in_grid]],
+        ushort3 tpitg[[thread_position_in_threadgroup]],
+        ushort3   ntg[[threads_per_threadgroup]]) {
+    const int32_t it = tgpig.x;
+
+    device const char * px = src0 + it*args.nb02;
+    device const char * pw = src1 + it*args.nb11;
+    device       char * pd = dst  + it*args.nb1;
+
+    for (int32_t i0 = tpitg.x; i0 < args.ne00; i0 += ntg.x) {
+        float sum = 0.0f;
+
+        for (int32_t ih = 0; ih < args.ne01; ++ih) {
+            const float xv = *((device const float *)(px + i0*args.nb00 + ih*args.nb01));
+            const float wv = *((device const float *)(pw + ih*args.nb10));
+
+            sum += xv*wv;
+        }
+
+        *((device float *)(pd + i0*args.nb0)) = sum;
+    }
+}
+
 constant bool FC_mul_mm_bc_inp [[function_constant(FC_MUL_MM + 0)]];
 constant bool FC_mul_mm_bc_out [[function_constant(FC_MUL_MM + 1)]];
 constant short FC_mul_mm_ne12  [[function_constant(FC_MUL_MM + 2)]];
