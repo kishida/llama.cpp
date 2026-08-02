@@ -1222,4 +1222,16 @@ typedef struct {
     int64_t  np;
 } ggml_metal_kargs_opt_step_sgd;
 
+typedef struct {
+    int64_t  ne00; // n_embd
+    int64_t  ne01; // hc
+    uint64_t nb00;
+    uint64_t nb01;
+    uint64_t nb02;
+    uint64_t nb10;
+    uint64_t nb11;
+    uint64_t nb0;
+    uint64_t nb1;
+} ggml_metal_kargs_dsv4_hc_pre;
+
 #endif // GGML_METAL_IMPL
