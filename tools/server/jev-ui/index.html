@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jev Demo</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --border: #e2e1dc;
+    --accent: #2f6fdb; --accent-soft: #dbe6fa; --bar: #9db8e8; --error: #b3261e; --ok: #2e7d32;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #9a9993; --border: #34332f;
+      --accent: #7aa7f5; --accent-soft: #24324b; --bar: #3d5f99; --error: #f28b82; --ok: #81c995; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=number], input[type=password], textarea, select { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+  textarea { resize: vertical; }
+  button { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: 13px; }
+  .note { font-size: 13px; color: var(--muted); }
+  .page-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .lang { display: inline-flex; }
+  .lang button { padding: 3px 10px; font-size: 13px; border-radius: 0; }
+  .lang button:first-child { border-radius: 6px 0 0 6px; }
+  .lang button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+  .lang button[aria-pressed=true] { background: var(--accent); color: #fff; }
+  .model { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .model h2 { margin: 0; }
+  #model-name { font-family: var(--mono); font-size: 13px; }
+  .tag { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+  .io { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .io > section { margin-bottom: 0; }
+  .io + section { margin-top: 16px; }
+  .examples { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+  .examples button { padding: 3px 10px; font-size: 13px; }
+  .images { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+  .thumb { position: relative; width: 84px; height: 84px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb button { position: absolute; top: 2px; right: 2px; padding: 0 6px; font-size: 12px; line-height: 18px; background: rgba(0,0,0,.55); border: none; }
+  .qhead { display: flex; justify-content: space-between; align-items: baseline; margin: 16px 0 6px; }
+  .qhead h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0; }
+  .qcard { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px 12px; margin-bottom: 10px; }
+  .qcard .qtop { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; gap: 8px; align-items: center; }
+  .qcard .qtop input { font-family: var(--mono); font-size: 13px; }
+  .qcard label { margin-top: 8px; }
+  button.icon { padding: 4px 10px; background: transparent; color: var(--muted); border-color: var(--border); }
+  button.add { padding: 5px 12px; font-size: 13px; }
+  .opts { display: flex; gap: 18px; margin: 12px 0; flex-wrap: wrap; font-size: 14px; align-items: center; }
+  .opts label { display: inline-flex; gap: 6px; align-items: center; margin: 0; color: var(--text); }
+  .opts input[type=number] { width: 90px; padding: 4px 8px; }
+  #run-status { font-size: 13px; margin-left: 10px; color: var(--muted); }
+  #run-status[data-kind=error] { color: var(--error); }
+  .ans { margin-bottom: 16px; }
+  .ans-head { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; margin-bottom: 4px; }
+  .ans-id { font-family: var(--mono); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ans-type { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .ans-meta { font-size: 12px; color: var(--muted); margin-bottom: 4px; font-family: var(--mono); }
+  .bar-row { margin: 0 0 6px; }
+  .bar-label { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-line { display: grid; grid-template-columns: 1fr 52px; gap: 8px; align-items: center; }
+  .bar-track { height: 12px; background: var(--accent-soft); border-radius: 4px; overflow: hidden; }
+  .bar-fill { display: block; height: 100%; background: var(--bar); }
+  .bar-row.top .bar-fill { background: var(--accent); }
+  .bar-row.top .bar-label { font-weight: 600; }
+  .bar-value { text-align: right; font-family: var(--mono); font-size: 12px; }
+  .tabs { display: flex; gap: 4px; align-items: flex-end; border-bottom: 1px solid var(--border); }
+  .tab { background: transparent; color: var(--muted); border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 12px; font-size: 14px; }
+  .tab[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab-note { margin-left: auto; padding: 6px 0; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  pre { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 12px 0 0; }
+  @media (max-width: 760px) { .io { grid-template-columns: 1fr; } .qcard .qtop { grid-template-columns: 1fr 110px auto; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="page-head">
+    <h1>Jev Demo</h1>
+    <div class="lang" role="group" aria-label="Language">
+      <button class="secondary" data-lang="ja">日本語</button><button class="secondary" data-lang="en">English</button>
+    </div>
+  </div>
+  <p class="lead" data-i18n="lead"></p>
+
+  <section class="model">
+    <h2 data-i18n="model"></h2><span id="model-name"></span><span class="tag" id="vision-tag" data-i18n="vision" hidden></span>
+  </section>
+
+  <div class="io">
+  <section>
+    <h2 data-i18n="input"></h2>
+    <div class="examples" id="examples"></div>
+    <label for="state" data-i18n="stateLabel"></label>
+    <textarea id="state" rows="4"></textarea>
+    <div id="image-box" hidden>
+      <label for="image-file" data-i18n="imagesLabel"></label>
+      <input id="image-file" type="file" accept="image/*" multiple>
+      <div class="images" id="images"></div>
+    </div>
+    <div class="qhead"><h3 data-i18n="questions"></h3><button class="secondary add" id="add-question" data-i18n="addQuestion"></button></div>
+    <div id="questions"></div>
+    <div class="opts">
+      <label><input id="calibrated" type="checkbox" checked> <span data-i18n="optCalibrated"></span></label>
+      <label><span data-i18n="optTemperature"></span> <input id="temperature" type="number" min="0.05" step="0.05" placeholder="auto"></label>
+      <label><input id="debias" type="checkbox"> <span data-i18n="optDebias"></span></label>
+    </div>
+    <div id="key-box" hidden>
+      <label for="api-key" data-i18n="apiKey"></label>
+      <input id="api-key" type="password" autocomplete="off">
+    </div>
+    <button id="run" data-i18n="run"></button><span id="run-status"></span>
+  </section>
+
+  <section>
+    <h2 data-i18n="results"></h2>
+    <div id="result"><p class="note" data-i18n="noResults"></p></div>
+  </section>
+  </div>
+
+  <section>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-request" aria-selected="false" data-i18n="tabRequest"></button>
+      <button class="tab" role="tab" id="tab-response" aria-selected="true" data-i18n="tabResponse"></button>
+      <span class="tab-note">POST /v1/systemone</span>
+    </div>
+    <pre id="json-req" hidden></pre>
+    <pre id="json"></pre>
+    <p class="note" data-i18n-html="apiNote"></p>
+  </section>
+</main>
+<script>
+"use strict";
+// Jev (TypeSafe System One) demo for llama-server: POST /v1/systemone
+
+const TYPESAFE = "https://docs.typesafe.ai/api";
+const STRINGS = {
+  ja: {
+    lead: "1つの state（と画像）に対する複数の質問（Noul / Choice / Score）に、選択肢ごとの確率で答えます。文章は生成せず、次の1トークンの確率を読むだけです。",
+    model: "モデル", vision: "画像対応",
+    input: "入力", stateLabel: "state（テキスト。{ } や [ ] で始めると JSON として送る）",
+    imagesLabel: "画像（任意。すべての質問に使われる）",
+    questions: "questions（すべて同じ state に対して評価）", addQuestion: "＋ 質問を追加", del: "この質問を削除",
+    optCalibrated: "温度スケーリング", optTemperature: "温度 T（空欄ならモデルの既定値）", optDebias: "提示順を入れ替えて平均",
+    apiKey: "API キー（サーバーが --api-key で起動されている場合）",
+    run: "評価する", runOk: "{ms} ms / {n}問 / {tokens} tokens",
+    results: "結果", noResults: "まだ結果はありません",
+    tabRequest: "リクエスト", tabResponse: "レスポンス",
+    apiNote: `API は TypeSafe System One（<a href="${TYPESAFE}" target="_blank" rel="noopener">docs.typesafe.ai/api</a>）と同じ形式です。拡張として <code>images</code>（画像）と <code>options.temperature</code> / <code>temperature_scaling</code> / <code>permutations</code> / <code>return_logits</code> を受け付けます。`,
+    critNoul: "criteria（任意）: true: … / false: … の2行", critChoice: "criteria: 1行に1つ。「選択肢: 説明」または「選択肢」だけ",
+    critScore: "criteria: 1行に1レベル。低い → 高い の順",
+    phNoul: "true: はっきり怒りを表している\nfalse: 怒りは表れていない", phChoice: "billing: 支払い・請求\ntechnical: 不具合・連携\nsales", phScore: "落ち着いている\nやや不満\n強く怒っている",
+    exSupport: "問い合わせ（4問）", exQuick: "Quickstart（英語・3問）", exPhoto: "写真（画像を追加して使う）",
+  },
+  en: {
+    lead: "Answers several questions (Noul / Choice / Score) about one state (and images) with a probability for each option. Nothing is generated: it only reads the probabilities of the next token.",
+    model: "Model", vision: "images supported",
+    input: "Input", stateLabel: "state (text; starting with { or [ sends it as JSON)",
+    imagesLabel: "Images (optional, used by every question)",
+    questions: "questions (all evaluated against the same state)", addQuestion: "+ Add question", del: "Remove this question",
+    optCalibrated: "Temperature scaling", optTemperature: "Temperature T (blank = model default)", optDebias: "Average over shuffled option order",
+    apiKey: "API key (if the server was started with --api-key)",
+    run: "Evaluate", runOk: "{ms} ms / {n} questions / {tokens} tokens",
+    results: "Results", noResults: "No results yet",
+    tabRequest: "Request", tabResponse: "Response",
+    apiNote: `The API uses the same format as TypeSafe System One (<a href="${TYPESAFE}" target="_blank" rel="noopener">docs.typesafe.ai/api</a>). As extensions it also accepts <code>images</code> and <code>options.temperature</code> / <code>temperature_scaling</code> / <code>permutations</code> / <code>return_logits</code>.`,
+    critNoul: "criteria (optional): two lines, true: … / false: …", critChoice: "criteria: one option per line, \"option: description\" or just \"option\"",
+    critScore: "criteria: one level per line, from low to high",
+    phNoul: "true: clearly expresses anger\nfalse: no sign of anger", phChoice: "billing: payments and invoices\ntechnical: bugs and integrations\nsales", phScore: "Calm\nSomewhat frustrated\nVery angry",
+    exSupport: "Support ticket (4 questions)", exQuick: "Quickstart (3 questions)", exPhoto: "Photo (add an image)",
+  },
+};
+
+let lang = (() => {
+  try { const s = localStorage.getItem("jev-lang"); if (s === "ja" || s === "en") return s; } catch {}
+  return navigator.language.toLowerCase().startsWith("ja") ? "ja" : "en";
+})();
+const t = (k, vars = {}) => STRINGS[lang][k].replace(/\{(\w+)\}/g, (m, v) => (v in vars ? String(vars[v]) : m));
+const $ = (id) => document.getElementById(id);
+
+// ------------------------------------------------------------ examples
+const EXAMPLES = [
+  { label: "exSupport",
+    ja: { state: "お客様: 3回目の問い合わせです。まだ配送されていません。もう限界です。返金してください。", questions: [
+      { id: "is_angry", type: "noul", instructions: "この顧客は怒っていますか？", criteria: "" },
+      { id: "emotion", type: "choice", instructions: "この顧客の感情はどれに近いですか？", criteria: "喜び\n悲しみ\n怒り\n不安\n驚き" },
+      { id: "urgency", type: "score", instructions: "この問い合わせの緊急度", criteria: "急ぎではない\n数日以内に対応\n今日中に対応\nすぐに対応が必要" },
+      { id: "department", type: "choice", instructions: "どの部署に回すべきですか？", criteria: "配送: 配送状況・遅延\n経理: 返金・請求\n技術サポート: システムの不具合" } ] },
+    en: { state: "Customer: This is my third inquiry. My order still hasn't been delivered. I've had enough. Please refund me.", questions: [
+      { id: "is_angry", type: "noul", instructions: "Is this customer angry?", criteria: "" },
+      { id: "emotion", type: "choice", instructions: "Which emotion is closest to this customer's?", criteria: "joy\nsadness\nanger\nanxiety\nsurprise" },
+      { id: "urgency", type: "score", instructions: "How urgent is this inquiry?", criteria: "Not urgent\nHandle within a few days\nHandle today\nNeeds immediate attention" },
+      { id: "department", type: "choice", instructions: "Which department should handle this?", criteria: "shipping: Delivery status and delays\naccounting: Refunds and billing\ntech support: System problems" } ] } },
+  { label: "exQuick",
+    ja: { state: "Hi, I've been trying to connect my Stripe account for 3 days and it keeps failing. I'm losing sales. Please help ASAP.", questions: [
+      { id: "department", type: "choice", instructions: "Which team should handle this", criteria: "billing: Payment or subscription issues\ntechnical: Bugs or integration problems\nsales: Pricing or account questions" },
+      { id: "frustration", type: "score", instructions: "How frustrated the customer appears", criteria: "Calm, just stating facts\nFrustrated but civil\nVery angry, strong language" },
+      { id: "is_urgent", type: "noul", instructions: "The message conveys urgency or time-sensitivity", criteria: "" } ] } },
+  { label: "exPhoto", vision: true,
+    ja: { state: "写真を見て答えてください。", questions: [
+      { id: "emotion", type: "choice", instructions: "写っている人の感情はどれに近いですか？", criteria: "喜び\n悲しみ\n怒り\n不安\n驚き" },
+      { id: "people", type: "score", instructions: "写っている人の数", criteria: "0人\n1人\n2人\n3人以上" },
+      { id: "scene", type: "choice", instructions: "どんな場面の写真ですか？", criteria: "食事\n仕事\nスポーツ\n旅行\nその他" },
+      { id: "smiling", type: "noul", instructions: "写っている人は笑っていますか？", criteria: "" } ] },
+    en: { state: "Answer by looking at the photo.", questions: [
+      { id: "emotion", type: "choice", instructions: "Which emotion is closest to that of the person in the photo?", criteria: "joy\nsadness\nanger\nanxiety\nsurprise" },
+      { id: "people", type: "score", instructions: "How many people are in the photo?", criteria: "none\none\ntwo\nthree or more" },
+      { id: "scene", type: "choice", instructions: "What kind of scene is this?", criteria: "meal\nwork\nsports\ntravel\nother" },
+      { id: "smiling", type: "noul", instructions: "Is the person smiling?", criteria: "" } ] } },
+];
+let currentExample = null, exampleSnapshot = "";
+const snapshot = () => JSON.stringify({ s: $("state").value, q: buildQuestions() });
+
+// ------------------------------------------------------------ question cards
+const HELP = { noul: ["critNoul", "phNoul"], choice: ["critChoice", "phChoice"], score: ["critScore", "phScore"] };
+
+function refreshCard(card) {
+  const [label, ph] = HELP[card.querySelector(".q-type").value];
+  card.querySelector(".q-crit-label").textContent = t(label);
+  card.querySelector(".q-crit").placeholder = t(ph);
+  card.querySelector(".q-del").title = t("del");
+}
+
+function addQuestion(d) {
+  const card = document.createElement("div");
+  card.className = "qcard";
+  card.innerHTML = `<div class="qtop"><input type="text" class="q-id" aria-label="question id">
+    <select class="q-type" aria-label="type"><option value="noul">noul</option><option value="choice">choice</option><option value="score">score</option></select>
+    <button class="icon q-del" aria-label="delete">×</button></div>
+    <label>instructions</label><input type="text" class="q-inst">
+    <label class="q-crit-label"></label><textarea class="q-crit"></textarea>`;
+  card.querySelector(".q-id").value = d.id;
+  card.querySelector(".q-type").value = d.type;
+  card.querySelector(".q-inst").value = d.instructions;
+  card.querySelector(".q-crit").value = d.criteria;
+  card.querySelector(".q-crit").rows = Math.max(2, d.criteria.split("\n").length);
+  refreshCard(card);
+  card.querySelector(".q-type").addEventListener("change", () => refreshCard(card));
+  card.querySelector(".q-del").addEventListener("click", () => { card.remove(); updateRequestJson(); });
+  card.addEventListener("input", updateRequestJson);
+  card.addEventListener("change", updateRequestJson);
+  $("questions").append(card);
+}
+
+function applyExample(ex) {
+  const c = (lang === "en" && ex.en) || ex.ja;
+  $("state").value = c.state;
+  $("questions").innerHTML = "";
+  c.questions.forEach(addQuestion);
+  currentExample = ex;
+  exampleSnapshot = snapshot();
+  updateRequestJson();
+}
+
+// ------------------------------------------------------------ images
+let images = []; // data URLs
+function renderImages() {
+  const box = $("images");
+  box.innerHTML = "";
+  images.forEach((url, i) => {
+    const d = document.createElement("div");
+    d.className = "thumb";
+    const img = document.createElement("img");
+    img.src = url;
+    const b = document.createElement("button");
+    b.textContent = "×";
+    b.addEventListener("click", () => { images.splice(i, 1); renderImages(); updateRequestJson(); });
+    d.append(img, b);
+    box.append(d);
+  });
+}
+$("image-file").addEventListener("change", async (ev) => {
+  for (const f of ev.target.files) {
+    images.push(await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); }));
+  }
+  ev.target.value = "";
+  renderImages();
+  updateRequestJson();
+});
+
+// ------------------------------------------------------------ request
+const lines = (s) => s.split("\n").map((x) => x.trim()).filter(Boolean);
+const splitKV = (l) => { const m = /^(.*?)\s*[:：]\s*(.*)$/.exec(l); return m ? [m[1].trim(), m[2].trim()] : [l, ""]; };
+
+function buildQuestions() {
+  const qs = {};
+  document.querySelectorAll(".qcard").forEach((card, i) => {
+    const id = card.querySelector(".q-id").value.trim() || `q${i + 1}`;
+    const type = card.querySelector(".q-type").value;
+    const instructions = card.querySelector(".q-inst").value;
+    const crit = lines(card.querySelector(".q-crit").value);
+    if (type === "choice") qs[id] = { type, instructions, criteria: Object.fromEntries(crit.map((l) => { const [k, v] = splitKV(l); return [k, v || null]; })) };
+    else if (type === "score") qs[id] = { type, instructions, criteria: crit };
+    else {
+      const c = {};
+      for (const l of crit) { const [k, v] = splitKV(l); if ((k === "true" || k === "false") && v) c[k] = v; }
+      qs[id] = Object.keys(c).length ? { type, instructions, criteria: c } : { type, instructions };
+    }
+  });
+  return qs;
+}
+
+function buildRequest() {
+  const raw = $("state").value.trim();
+  let state = raw;
+  if (/^[[{]/.test(raw)) { try { state = JSON.parse(raw); } catch {} }
+  const req = { state, model: "jev-latest", questions: buildQuestions() };
+  if (images.length) req.images = images.slice();
+  const options = {};
+  if (!$("calibrated").checked) options.temperature_scaling = false;
+  const T = parseFloat($("temperature").value);
+  if (T > 0) options.temperature = T;
+  if ($("debias").checked) options.permutations = 4;
+  if (Object.keys(options).length) req.options = options;
+  return req;
+}
+
+function updateRequestJson() {
+  const req = buildRequest();
+  // show image data shortened
+  if (req.images) req.images = req.images.map((u) => u.slice(0, 40) + `…(${Math.round(u.length / 1024)} KB)`);
+  $("json-req").textContent = JSON.stringify(req, null, 2);
+}
+
+// ------------------------------------------------------------ results
+function bars(entries, top) {
+  const frag = document.createDocumentFragment();
+  for (const [label, p] of entries) {
+    const row = document.createElement("div");
+    row.className = "bar-row" + (label === top ? " top" : "");
+    const name = document.createElement("span");
+    name.className = "bar-label"; name.textContent = label; name.title = label;
+    const line = document.createElement("div"); line.className = "bar-line";
+    const track = document.createElement("span"); track.className = "bar-track";
+    const fill = document.createElement("span"); fill.className = "bar-fill"; fill.style.width = `${(p * 100).toFixed(1)}%`;
+    track.append(fill);
+    const val = document.createElement("span"); val.className = "bar-value"; val.textContent = `${(p * 100).toFixed(1)}%`;
+    line.append(track, val); row.append(name, line); frag.append(row);
+  }
+  return frag;
+}
+
+function render(res) {
+  const out = $("result");
+  out.innerHTML = "";
+  for (const [id, a] of Object.entries(res.answers)) {
+    const box = document.createElement("div"); box.className = "ans";
+    const head = document.createElement("div"); head.className = "ans-head";
+    const idEl = document.createElement("span"); idEl.className = "ans-id"; idEl.textContent = id;
+    const ty = document.createElement("span"); ty.className = "ans-type"; ty.textContent = a.type;
+    head.append(idEl, ty);
+    const meta = document.createElement("div"); meta.className = "ans-meta";
+    box.append(head, meta);
+    if (a.type === "noul") {
+      meta.textContent = `noul = ${a.noul.toFixed(3)}`;
+      box.append(bars([["yes", a.noul], ["no", 1 - a.noul]], a.noul >= 0.5 ? "yes" : "no"));
+    } else if (a.type === "choice") {
+      meta.textContent = `confidence ${a.confidence.toFixed(3)}`;
+      box.append(bars(Object.entries(a.probabilities), a.choice));
+    } else {
+      meta.textContent = `score ${a.score.toFixed(2)} / confidence ${a.confidence.toFixed(3)}`;
+      const entries = Object.entries(a.probabilities).map(([k, p]) => [`${k}: ${a.legend[k]}`, p]);
+      box.append(bars(entries, entries.reduce((m, e) => (e[1] > m[1] ? e : m), entries[0])[0]));
+    }
+    out.append(box);
+  }
+  $("json").textContent = JSON.stringify(res, null, 2);
+}
+
+let runMsg = null; // {key, vars} or {raw}
+function showRun(m, kind) {
+  runMsg = { ...m, kind };
+  const el = $("run-status");
+  el.textContent = m.key ? t(m.key, m.vars) : m.raw;
+  el.dataset.kind = kind;
+}
+
+async function run() {
+  const btn = $("run");
+  btn.disabled = true;
+  updateRequestJson();
+  const t0 = performance.now();
+  try {
+    const headers = { "content-type": "application/json" };
+    const key = $("api-key").value.trim();
+    if (key) headers.authorization = `Bearer ${key}`;
+    const r = await fetch("v1/systemone", { method: "POST", headers, body: JSON.stringify(buildRequest()) });
+    const j = await r.json();
+    if (r.status === 401) $("key-box").hidden = false;
+    if (!r.ok || j.error) {
+      const e = j.error || {};
+      throw new Error(`${e.code ?? r.status}: ${e.message ?? ""}${e.field ? ` (${e.field})` : ""}`);
+    }
+    render(j);
+    if (!$("model-name").textContent && j.model) $("model-name").textContent = j.model.split(/[\\/]/).pop();
+    showRun({ key: "runOk", vars: { ms: Math.round(performance.now() - t0), n: Object.keys(j.answers).length, tokens: j.usage.input_tokens } }, "ok");
+  } catch (e) {
+    $("result").innerHTML = "";
+    $("json").textContent = String(e.message);
+    showRun({ raw: e.message }, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ------------------------------------------------------------ language
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach((el) => (el.textContent = t(el.dataset.i18n)));
+  document.querySelectorAll("[data-i18n-html]").forEach((el) => (el.innerHTML = t(el.dataset.i18nHtml)));
+  document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+  document.querySelectorAll(".qcard").forEach(refreshCard);
+  if (runMsg) showRun(runMsg, runMsg.kind);
+}
+document.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => {
+  const unchanged = currentExample && snapshot() === exampleSnapshot;
+  lang = b.dataset.lang;
+  try { localStorage.setItem("jev-lang", lang); } catch {}
+  applyLang();
+  if (unchanged) applyExample(currentExample);
+}));
+
+// ------------------------------------------------------------ init
+function selectTab(which) {
+  $("tab-request").setAttribute("aria-selected", String(which === "request"));
+  $("tab-response").setAttribute("aria-selected", String(which === "response"));
+  $("json-req").hidden = which !== "request";
+  $("json").hidden = which !== "response";
+}
+$("tab-request").addEventListener("click", () => selectTab("request"));
+$("tab-response").addEventListener("click", () => selectTab("response"));
+for (const id of ["state", "calibrated", "temperature", "debias"]) {
+  $(id).addEventListener("input", updateRequestJson);
+  $(id).addEventListener("change", updateRequestJson);
+}
+$("add-question").addEventListener("click", () => {
+  addQuestion({ id: `q${document.querySelectorAll(".qcard").length + 1}`, type: "choice", instructions: "", criteria: "" });
+  updateRequestJson();
+});
+$("run").addEventListener("click", run);
+
+(async () => {
+  let vision = false;
+  try {
+    const r = await fetch("props");
+    if (r.status === 401) $("key-box").hidden = false;
+    const p = await r.json();
+    const name = (p.model_alias || p.model_path || "").split(/[\\/]/).pop();
+    $("model-name").textContent = name;
+    vision = !!(p.modalities && p.modalities.vision);
+  } catch {}
+  $("image-box").hidden = !vision;
+  $("vision-tag").hidden = !vision;
+  for (const ex of EXAMPLES) {
+    if (ex.vision && !vision) continue;
+    const b = document.createElement("button");
+    b.className = "secondary";
+    b.dataset.i18n = ex.label;
+    b.addEventListener("click", () => applyExample(ex));
+    $("examples").append(b);
+  }
+  applyLang();
+  applyExample(EXAMPLES[0]);
+})();
+</script>
+</body>
+</html>

@@ -4,6 +4,7 @@
 #include "server-cors-proxy.h"
 #include "server-stream.h"
 #include "server-tools.h"
+#include "server-jev-ui.hpp"
 
 #include "arg.h"
 #include "build-info.h"
@@ -224,6 +225,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
         routes.post_embeddings             = models_routes->proxy_post;
         routes.post_embeddings_oai         = models_routes->proxy_post;
         routes.post_rerank                 = models_routes->proxy_post;
+        routes.post_systemone              = models_routes->proxy_post;
         routes.post_tokenize               = models_routes->proxy_post;
         routes.post_detokenize             = models_routes->proxy_post;
         routes.post_apply_template         = models_routes->proxy_post;
@@ -271,6 +273,13 @@ int llama_server(common_params & params, int argc, char ** argv) {
     ctx_http.post("/reranking",                ex_wrapper(routes.post_rerank));
     ctx_http.post("/v1/rerank",                ex_wrapper(routes.post_rerank));
     ctx_http.post("/v1/reranking",             ex_wrapper(routes.post_rerank));
+    ctx_http.get ("/jev",                      [](const server_http_req &) { // Jev demo page (jev-ui/index.html)
+        auto res = std::make_unique<server_http_res>();
+        res->content_type = "text/html; charset=utf-8";
+        res->data.assign(reinterpret_cast<const char *>(jev_ui_index_html), sizeof(jev_ui_index_html));
+        return res;
+    });
+    ctx_http.post("/v1/systemone",             ex_wrapper(routes.post_systemone)); // Jev (TypeSafe System One) compatible classification
     ctx_http.post("/tokenize",                 ex_wrapper(routes.post_tokenize));
     ctx_http.post("/detokenize",               ex_wrapper(routes.post_detokenize));
     ctx_http.post("/apply-template",           ex_wrapper(routes.post_apply_template));

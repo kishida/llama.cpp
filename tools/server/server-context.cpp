@@ -2225,6 +2225,27 @@ private:
         queue_results.send(std::move(res));
     }
 
+    void send_label_logits(const server_slot & slot, int32_t tok_idx) {
+        const float * logits = llama_get_logits_ith(slot.ctx_tgt, tok_idx);
+        if (logits == nullptr) {
+            send_error(slot, "failed to get logits for label tokens", ERROR_TYPE_SERVER);
+            return;
+        }
+
+        auto res = std::make_unique<server_task_result_label_logits>();
+        res->id       = slot.task->id;
+        res->index    = slot.task->index;
+        res->n_tokens = slot.task->n_tokens();
+        res->logits.reserve(slot.task->label_tokens.size());
+        for (const llama_token t : slot.task->label_tokens) {
+            res->logits.push_back(logits[t]);
+        }
+
+        SLT_DBG(slot, "sending label logits, n_labels = %zu\n", res->logits.size());
+
+        queue_results.send(std::move(res));
+    }
+
     //
     // Functions to process the task
     //
@@ -2384,6 +2405,7 @@ private:
             case SERVER_TASK_TYPE_INFILL:
             case SERVER_TASK_TYPE_EMBEDDING:
             case SERVER_TASK_TYPE_RERANK:
+            case SERVER_TASK_TYPE_LABEL_LOGITS:
                 {
                     // special case: if input is provided via CLI, tokenize it first
                     // otherwise, no need to tokenize as it's already done inside the HTTP thread
@@ -3831,6 +3853,14 @@ private:
                     return;
                 }
 
+                if (slot.task->type == SERVER_TASK_TYPE_LABEL_LOGITS) {
+                    // prompt evaluated: read the logits of the label tokens at the last position, no sampling
+                    send_label_logits(slot, slot.i_batch - off);
+                    slot.release();
+                    slot.i_batch = -1;
+                    return;
+                }
+
                 GGML_ASSERT(slot.task->need_sampling());
 
                 // prompt evaluated for next-token prediction
@@ -5224,6 +5254,145 @@ void server_routes::init_routes() {
         return res;
     };
 
+    this->post_systemone = [this](const server_http_req & req) {
+        auto res = create_response();
+
+        auto send_jev_error = [&](const jev_error & e) {
+            res->status = 422;
+            res->data   = safe_json_to_str(e.to_json());
+            return std::move(res);
+        };
+
+        // a Jev fine-tuned model carries its calibrated temperature in the GGUF metadata
+        char buf[64] = {0};
+        const bool  jev_format  = llama_model_meta_val_str(ctx_server.model_tgt, "jev.temperature", buf, sizeof(buf)) >= 0;
+        const float temperature = jev_format ? std::stof(buf) : 1.0f;
+
+        json body;
+        try {
+            body = json::parse(req.body);
+        } catch (const std::exception &) {
+            return send_jev_error(jev_error("invalid_json", "request body is not valid JSON"));
+        }
+
+        std::vector<jev_label> labels;
+        jev_request jreq;
+        try {
+            labels = get_jev_labels(jev_format);
+            if (labels.size() < 2) {
+                throw std::runtime_error("the vocabulary has too few single-token label symbols");
+            }
+            jreq = jev_parse_request(body, labels.size());
+        } catch (const jev_error & e) {
+            return send_jev_error(e);
+        } catch (const std::exception & e) {
+            res->error(format_error_response(e.what(), ERROR_TYPE_SERVER));
+            return res;
+        }
+
+        // images (extension): decoded once, placed at the start of every prompt
+        std::vector<raw_buffer> files;
+        std::string image_prefix;
+        if (!jreq.images.empty()) {
+            if (ctx_server.mctx == nullptr) {
+                return send_jev_error(jev_error("images_not_supported", "this model does not accept images (start the server with --mmproj)", "images"));
+            }
+            try {
+                for (const auto & img : jreq.images) {
+                    handle_media(files, img, meta->chat_params.media_path);
+                    image_prefix += get_media_marker();
+                    image_prefix += "\n";
+                }
+            } catch (const std::exception & e) {
+                return send_jev_error(jev_error("invalid_images", std::string("failed to load image: ") + e.what(), "images"));
+            }
+        }
+
+        // one task per question and option order (cyclic shifts); all share the state prefix
+        struct seq_ref { size_t q; size_t k; };
+        std::vector<seq_ref> refs;
+        std::vector<std::vector<std::vector<int>>> perms(jreq.questions.size());
+        int64_t n_input_tokens = 0;
+        auto & rd = res->rd;
+        {
+            std::vector<server_task> tasks;
+            try {
+                for (size_t qi = 0; qi < jreq.questions.size(); qi++) {
+                    const auto & q = jreq.questions[qi];
+                    const size_t n = q.keys.size();
+                    const size_t K = std::min<size_t>(jreq.permutations, n);
+                    std::vector<llama_token> label_tokens;
+                    for (size_t i = 0; i < n; i++) {
+                        label_tokens.push_back(labels[i].token);
+                    }
+                    for (size_t k = 0; k < K; k++) {
+                        const size_t shift = (size_t) std::lround((double) k * n / K);
+                        std::vector<int> perm(n);
+                        for (size_t i = 0; i < n; i++) {
+                            perm[i] = (int) ((i + shift) % n);
+                        }
+                        const std::string prompt = jev_prompt(image_prefix + jev_user_message(jreq, q, labels, perm, jev_format), jev_format);
+                        server_tokens tokens = files.empty()
+                            ? std::move(tokenize_input_prompts(ctx_server.vocab, ctx_server.mctx, json(prompt), true, true, ctx_server.init_opt)[0])
+                            : process_mtmd_prompt(ctx_server.mctx, prompt, files, ctx_server.init_opt);
+                        if ((int) tokens.size() >= meta->slot_n_ctx) {
+                            throw jev_error("context_too_long", "prompt for question \"" + q.id + "\" is " + std::to_string(tokens.size()) +
+                                            " tokens (context size " + std::to_string(meta->slot_n_ctx) + ")", "state");
+                        }
+                        n_input_tokens += tokens.size();
+
+                        server_task task = server_task(SERVER_TASK_TYPE_LABEL_LOGITS);
+                        task.id           = rd.get_new_id();
+                        task.index        = refs.size();
+                        task.tokens       = std::move(tokens);
+                        task.label_tokens = label_tokens;
+                        tasks.push_back(std::move(task));
+
+                        refs.push_back({qi, k});
+                        perms[qi].push_back(std::move(perm));
+                    }
+                }
+            } catch (const jev_error & e) {
+                return send_jev_error(e);
+            }
+            rd.post_tasks(std::move(tasks));
+        }
+
+        auto all_results = rd.wait_for_all(req.should_stop);
+        if (all_results.is_terminated) {
+            return res; // connection is closed
+        }
+        if (all_results.error) {
+            res->error(all_results.error->to_json());
+            return res;
+        }
+
+        // logits[q][k][pos]
+        std::vector<std::vector<std::vector<float>>> logits(jreq.questions.size());
+        for (size_t qi = 0; qi < jreq.questions.size(); qi++) {
+            logits[qi].resize(perms[qi].size());
+        }
+        for (auto & r : all_results.results) {
+            auto * lr = dynamic_cast<server_task_result_label_logits *>(r.get());
+            GGML_ASSERT(lr != nullptr);
+            const seq_ref & ref = refs.at(lr->index);
+            logits[ref.q][ref.k] = lr->logits;
+        }
+
+        const float T = jreq.temperature > 0 ? jreq.temperature : (jreq.temperature_scaling ? temperature : 1.0f);
+        json answers = json::object();
+        for (size_t qi = 0; qi < jreq.questions.size(); qi++) {
+            answers[jreq.questions[qi].id] = jev_answer(jreq.questions[qi], logits[qi], perms[qi], T, jreq.return_logits);
+        }
+
+        res->ok(json{
+            {"model",   meta->model_name},
+            {"answers", answers},
+            {"usage",   {{"input_tokens", n_input_tokens}, {"output_tokens", 0}}},
+        });
+        return res;
+    };
+
     this->get_lora_adapters = [this](const server_http_req & req) {
         auto res = create_response();
 
@@ -5555,4 +5724,51 @@ void server_routes::update_cached_responses(bool is_sleeping) {
 
         should_reset_buckets = false;
     }
+}
+
+//
+// Jev (/v1/systemone) helpers
+//
+
+std::string server_routes::jev_prompt(const std::string & user_message, bool jev_format) const {
+    if (jev_format) {
+        return jev_fixed_prompt(user_message);
+    }
+    // the model's own chat template, with thinking disabled so that the answer label is the next token
+    common_chat_templates_inputs inputs;
+    common_chat_msg msg;
+    msg.role    = "user";
+    msg.content = user_message;
+    inputs.messages              = {msg};
+    inputs.add_generation_prompt = true;
+    inputs.use_jinja             = meta->chat_params.use_jinja;
+    inputs.chat_template_kwargs  = meta->chat_params.chat_template_kwargs;
+    inputs.chat_template_kwargs["enable_thinking"] = "false";
+    inputs.enable_thinking       = false;
+    return common_chat_templates_apply(meta->chat_params.tmpls.get(), inputs).prompt;
+}
+
+std::vector<jev_label> server_routes::get_jev_labels(bool jev_format) {
+    std::lock_guard<std::mutex> lock(mutex_jev);
+    if (jev_labels_ready) {
+        return jev_labels;
+    }
+    // a symbol is usable as a label if appending it to the generation prompt adds exactly one token
+    // (this also handles tokenizers that add a leading space, e.g. SentencePiece "▁A" vs "A")
+    const std::string base = jev_prompt("x", jev_format);
+    const std::vector<llama_token> base_tokens = common_tokenize(ctx_server.vocab, base, true, true);
+    std::set<llama_token> used;
+    for (const auto & text : jev_label_candidates()) {
+        const std::vector<llama_token> toks = common_tokenize(ctx_server.vocab, base + text, true, true);
+        if (toks.size() != base_tokens.size() + 1 || !std::equal(base_tokens.begin(), base_tokens.end(), toks.begin())) {
+            continue;
+        }
+        if (!used.insert(toks.back()).second) {
+            continue;
+        }
+        jev_labels.push_back({text, toks.back()});
+    }
+    SRV_INF("jev: %zu single-token labels, format = %s\n", jev_labels.size(), jev_format ? "jev (fine-tuned)" : "chat template");
+    jev_labels_ready = true;
+    return jev_labels;
 }

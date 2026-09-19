@@ -198,6 +198,7 @@ bool server_http_context::init(const common_params & params) {
         std::unordered_set<std::string> endpoints {
             "/health",
             "/v1/health",
+            "/jev", // Jev demo page (static HTML; the API calls it makes still need the key)
         };
         endpoints.insert(frontend_paths.begin(), frontend_paths.end());
         return endpoints;
