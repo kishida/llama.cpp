@@ -105,6 +105,9 @@ std::string gen_tool_call_id();
 // get a random marker; note: each time the server restarts, the marker will be different
 const char * get_media_marker();
 
+// load a media file given as http(s):// URL, file:// (only with media_path), data: URI, or raw base64
+void handle_media(std::vector<raw_buffer> & out_files, const std::string & url, const std::string & media_path);
+
 //
 // lora utils
 //

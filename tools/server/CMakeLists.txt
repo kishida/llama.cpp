@@ -23,6 +23,8 @@ add_library(${TARGET} STATIC
     server-mcp.h
     server-schema.cpp
     server-schema.h
+    server-jev.cpp
+    server-jev.h
 )
 
 if (BUILD_SHARED_LIBS)
@@ -32,6 +34,17 @@ endif()
 target_include_directories(${TARGET} PRIVATE ../mtmd)
 target_include_directories(${TARGET} PRIVATE ${PROJECT_SOURCE_DIR})
 target_link_libraries(${TARGET} PUBLIC llama-common mtmd ${CMAKE_THREAD_LIBS_INIT})
+
+# Jev demo page (jev-ui/index.html) embedded as a byte array, served at /jev
+
+set(JEV_UI_SRC ${CMAKE_CURRENT_SOURCE_DIR}/jev-ui/index.html)
+set(JEV_UI_OUT ${CMAKE_CURRENT_BINARY_DIR}/server-jev-ui.hpp)
+add_custom_command(
+    OUTPUT ${JEV_UI_OUT}
+    COMMAND ${CMAKE_COMMAND} -DJEV_UI_SRC=${JEV_UI_SRC} -DJEV_UI_OUT=${JEV_UI_OUT} -P ${CMAKE_CURRENT_SOURCE_DIR}/jev-ui/embed.cmake
+    DEPENDS ${JEV_UI_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/jev-ui/embed.cmake
+    COMMENT "Embedding jev-ui/index.html"
+)
 
 # llama-server-impl: server logic, reusable by app
 
@@ -43,6 +56,7 @@ add_library(${TARGET}
     server-http.h
     server-models.cpp
     server-models.h
+    ${JEV_UI_OUT}
 )
 set_target_properties(${TARGET} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 

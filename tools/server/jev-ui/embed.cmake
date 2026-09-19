@@ -1,0 +1,5 @@
+# Converts jev-ui/index.html into a C++ header (run at build time: cmake -DJEV_UI_SRC=... -DJEV_UI_OUT=... -P embed.cmake)
+file(READ "${JEV_UI_SRC}" hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," bytes "${hex}")
+string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)" "\\1\n" bytes "${bytes}")
+file(WRITE "${JEV_UI_OUT}" "// generated from tools/server/jev-ui/index.html - do not edit\n#pragma once\nstatic const unsigned char jev_ui_index_html[] = {\n${bytes}\n};\n")

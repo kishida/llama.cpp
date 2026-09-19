@@ -1485,6 +1485,17 @@ json server_task_result_embd::to_json_oaicompat() {
 }
 
 //
+// server_task_result_label_logits
+//
+json server_task_result_label_logits::to_json() {
+    return json {
+        {"index",    index},
+        {"logits",   logits},
+        {"tokens_evaluated", n_tokens},
+    };
+}
+
+//
 // server_task_result_rerank
 //
 json server_task_result_rerank::to_json() {

@@ -3,6 +3,7 @@
 #include "server-http.h"
 #include "server-task.h"
 #include "server-queue.h"
+#include "server-jev.h"
 
 #include "json.h"
 
@@ -152,6 +153,7 @@ struct server_routes {
     server_http_context::handler_t post_embeddings;
     server_http_context::handler_t post_embeddings_oai;
     server_http_context::handler_t post_rerank;
+    server_http_context::handler_t post_systemone; // Jev (TypeSafe System One) compatible classification
     server_http_context::handler_t get_lora_adapters;
     server_http_context::handler_t post_lora_adapters;
 
@@ -180,6 +182,13 @@ private:
     server_queue & queue_tasks;
     server_response & queue_results;
     std::unique_ptr<server_res_generator> create_response(bool bypass_sleep = false);
+
+    // Jev: label symbols that are a single token right after the generation prompt (computed on first use)
+    std::mutex             mutex_jev;
+    bool                   jev_labels_ready = false;
+    std::vector<jev_label> jev_labels;
+    std::vector<jev_label> get_jev_labels(bool jev_format);
+    std::string            jev_prompt(const std::string & user_message, bool jev_format) const;
 
     // cached responses, to be used during sleep
     std::mutex     mutex_cache;

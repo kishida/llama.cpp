@@ -16,6 +16,7 @@ enum server_task_type {
     SERVER_TASK_TYPE_COMPLETION,
     SERVER_TASK_TYPE_EMBEDDING,
     SERVER_TASK_TYPE_RERANK,
+    SERVER_TASK_TYPE_LABEL_LOGITS, // Jev /v1/systemone: logits of given label tokens at the end of the prompt
     SERVER_TASK_TYPE_INFILL,
     SERVER_TASK_TYPE_CANCEL,
     SERVER_TASK_TYPE_CONTROL,
@@ -175,6 +176,9 @@ struct server_task {
     // used by SERVER_TASK_TYPE_SET_LORA
     std::map<int, float> set_lora; // mapping adapter ID -> scale
 
+    // used by SERVER_TASK_TYPE_LABEL_LOGITS
+    std::vector<llama_token> label_tokens;
+
     server_task() = default;
 
     server_task(server_task_type type) : type(type) {}
@@ -197,6 +201,7 @@ struct server_task {
         switch (type) {
             case SERVER_TASK_TYPE_COMPLETION:
             case SERVER_TASK_TYPE_INFILL:
+            case SERVER_TASK_TYPE_LABEL_LOGITS:
                 return true;
             default:
                 return false;
@@ -468,6 +473,14 @@ struct server_task_result_embd : server_task_result {
 
 struct server_task_result_rerank : server_task_result {
     float score = -1e6;
+
+    int32_t n_tokens;
+
+    virtual json to_json() override;
+};
+
+struct server_task_result_label_logits : server_task_result {
+    std::vector<float> logits; // one per label token
 
     int32_t n_tokens;
 

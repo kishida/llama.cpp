@@ -793,6 +793,26 @@ curl http://127.0.0.1:8012/v1/rerank \
     }' | jq
 ```
 
+### POST `/v1/systemone`: Answer multiple-choice questions with a probability per option
+
+Classifies a text (or an image) by reading the probabilities of the option labels from the next token, without
+generating any text. Works with any model. See [Jev](../../docs/jev.md) for the full description, and the demo
+page at `GET /jev`.
+
+*Example:*
+
+```shell
+curl http://127.0.0.1:8012/v1/systemone     -H "Content-Type: application/json"     -d '{
+        "model": "some-model",
+        "state": "My order still has not arrived. Refund me.",
+        "questions": {
+            "is_angry":   { "type": "noul",   "instructions": "Is this customer angry?" },
+            "department": { "type": "choice", "instructions": "Which team should handle this",
+                            "criteria": { "billing": null, "technical": null, "sales": null } }
+        }
+    }' | jq
+```
+
 ### POST `/infill`: For code infilling.
 
 Takes a prefix and a suffix and returns the predicted completion as stream.
