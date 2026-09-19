@@ -5263,10 +5263,10 @@ void server_routes::init_routes() {
             return std::move(res);
         };
 
-        // a Jev fine-tuned model carries its calibrated temperature in the GGUF metadata
+        // a model fine-tuned for this task can carry its calibrated temperature in the GGUF metadata
         char buf[64] = {0};
-        const bool  jev_format  = llama_model_meta_val_str(ctx_server.model_tgt, "jev.temperature", buf, sizeof(buf)) >= 0;
-        const float temperature = jev_format ? std::stof(buf) : 1.0f;
+        const bool  has_temp    = llama_model_meta_val_str(ctx_server.model_tgt, "jev.temperature", buf, sizeof(buf)) >= 0;
+        const float temperature = has_temp ? std::stof(buf) : 1.0f;
 
         json body;
         try {
@@ -5278,7 +5278,7 @@ void server_routes::init_routes() {
         std::vector<jev_label> labels;
         jev_request jreq;
         try {
-            labels = get_jev_labels(jev_format);
+            labels = get_jev_labels();
             if (labels.size() < 2) {
                 throw std::runtime_error("the vocabulary has too few single-token label symbols");
             }
@@ -5331,7 +5331,7 @@ void server_routes::init_routes() {
                         for (size_t i = 0; i < n; i++) {
                             perm[i] = (int) ((i + shift) % n);
                         }
-                        const std::string prompt = jev_prompt(image_prefix + jev_user_message(jreq, q, labels, perm, jev_format), jev_format);
+                        const std::string prompt = jev_prompt(image_prefix + jev_user_message(jreq, q, labels, perm));
                         server_tokens tokens = files.empty()
                             ? std::move(tokenize_input_prompts(ctx_server.vocab, ctx_server.mctx, json(prompt), true, true, ctx_server.init_opt)[0])
                             : process_mtmd_prompt(ctx_server.mctx, prompt, files, ctx_server.init_opt);
@@ -5730,10 +5730,7 @@ void server_routes::update_cached_responses(bool is_sleeping) {
 // Jev (/v1/systemone) helpers
 //
 
-std::string server_routes::jev_prompt(const std::string & user_message, bool jev_format) const {
-    if (jev_format) {
-        return jev_fixed_prompt(user_message);
-    }
+std::string server_routes::jev_prompt(const std::string & user_message) const {
     // the model's own chat template, with thinking disabled so that the answer label is the next token
     common_chat_templates_inputs inputs;
     common_chat_msg msg;
@@ -5748,14 +5745,14 @@ std::string server_routes::jev_prompt(const std::string & user_message, bool jev
     return common_chat_templates_apply(meta->chat_params.tmpls.get(), inputs).prompt;
 }
 
-std::vector<jev_label> server_routes::get_jev_labels(bool jev_format) {
+std::vector<jev_label> server_routes::get_jev_labels() {
     std::lock_guard<std::mutex> lock(mutex_jev);
     if (jev_labels_ready) {
         return jev_labels;
     }
     // a symbol is usable as a label if appending it to the generation prompt adds exactly one token
     // (this also handles tokenizers that add a leading space, e.g. SentencePiece "▁A" vs "A")
-    const std::string base = jev_prompt("x", jev_format);
+    const std::string base = jev_prompt("x");
     const std::vector<llama_token> base_tokens = common_tokenize(ctx_server.vocab, base, true, true);
     std::set<llama_token> used;
     for (const auto & text : jev_label_candidates()) {
@@ -5768,7 +5765,7 @@ std::vector<jev_label> server_routes::get_jev_labels(bool jev_format) {
         }
         jev_labels.push_back({text, toks.back()});
     }
-    SRV_INF("jev: %zu single-token labels, format = %s\n", jev_labels.size(), jev_format ? "jev (fine-tuned)" : "chat template");
+    SRV_INF("jev: %zu single-token labels\n", jev_labels.size());
     jev_labels_ready = true;
     return jev_labels;
 }

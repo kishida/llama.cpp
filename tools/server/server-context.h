@@ -187,8 +187,8 @@ private:
     std::mutex             mutex_jev;
     bool                   jev_labels_ready = false;
     std::vector<jev_label> jev_labels;
-    std::vector<jev_label> get_jev_labels(bool jev_format);
-    std::string            jev_prompt(const std::string & user_message, bool jev_format) const;
+    std::vector<jev_label> get_jev_labels();
+    std::string            jev_prompt(const std::string & user_message) const;
 
     // cached responses, to be used during sleep
     std::mutex     mutex_cache;

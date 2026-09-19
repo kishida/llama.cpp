@@ -11,11 +11,10 @@
 // logits of the next token (no text is generated). Questions that share the same state share the prompt prefix,
 // so the prompt cache can reuse it.
 //
-// If the model has the GGUF metadata key "jev.temperature" (a Jev fine-tuned model), the fixed prompt format used
-// during fine-tuning is used and the logits are divided by that temperature. Otherwise the model's own chat template
-// is used (with thinking disabled) and the temperature is 1. General models are usually over-confident, so pass a
-// calibrated temperature with the extension "options": {"temperature": T} (fit it on labelled data using
-// "options": {"return_logits": true}).
+// The prompt is built with the model's own chat template, with thinking disabled so that the answer label is the
+// next token. Models are usually over-confident, so pass a calibrated temperature with the extension
+// "options": {"temperature": T} (fit it on labelled data using "options": {"return_logits": true}). A model
+// fine-tuned for this task can ship its own temperature in the GGUF metadata key "jev.temperature".
 
 #include "server-common.h"
 
@@ -65,10 +64,8 @@ const std::vector<std::string> & jev_label_candidates();
 
 // user message for a question, with options presented in the order given by perm (perm[k] = original option index)
 std::string jev_user_message(const jev_request & req, const jev_question & q, const std::vector<jev_label> & labels,
-                             const std::vector<int> & perm, bool jev_format);
+                             const std::vector<int> & perm);
 
-// complete prompt in the fixed format used for Jev fine-tuning (Qwen3 chat format, thinking disabled)
-std::string jev_fixed_prompt(const std::string & user_message);
 
 // build the answer from the label logits of each permutation (logits[k][pos] for perms[k])
 json jev_answer(const jev_question & q, const std::vector<std::vector<float>> & logits,
