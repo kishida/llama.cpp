@@ -184,23 +184,15 @@ const std::vector<std::string> & jev_label_candidates() {
 }
 
 std::string jev_user_message(const jev_request & req, const jev_question & q, const std::vector<jev_label> & labels,
-                             const std::vector<int> & perm, bool jev_format) {
+                             const std::vector<int> & perm) {
     std::string opts;
     for (size_t pos = 0; pos < perm.size(); pos++) {
         if (pos > 0) opts += "\n";
         opts += labels[pos].text + ": " + q.texts[perm[pos]];
     }
-    if (jev_format) {
-        // must match jev/prompt.py build_user_message (the format used for fine-tuning)
-        return "背景: " + req.state + "\n次の質問に選択肢のラベル一文字のみで答えてください。\n質問: " + q.instructions + "\n" + opts;
-    }
     return "Context:\n" + req.state + "\n\n"
            "Answer the question with only the label of the best option (the character before the colon), nothing else.\n"
            "Question: " + q.instructions + "\nOptions:\n" + opts;
-}
-
-std::string jev_fixed_prompt(const std::string & user_message) {
-    return "<|im_start|>user\n" + user_message + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
 }
 
 static double jev_round(double x) {

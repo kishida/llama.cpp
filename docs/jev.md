@@ -13,6 +13,30 @@ It works with **any model** — no fine-tuning needed. The API is compatible wit
 
 ## Quick start
 
+This endpoint is not in upstream llama.cpp yet, so build the `jev` branch of the fork:
+
+```bash
+git clone -b jev https://github.com/kishida/llama.cpp
+cd llama.cpp
+```
+
+Windows with an NVIDIA GPU (needs the CUDA toolkit and Visual Studio):
+
+```bash
+cmake -B build -DGGML_CUDA=ON
+cmake --build build --config Release --target llama-server -j 16
+```
+
+macOS (Metal is on by default, nothing to configure):
+
+```bash
+cmake -B build
+cmake --build build --config Release --target llama-server -j 8
+```
+
+Pass `-j` the number of cores you want to build with. The binary lands in `build/bin/Release/llama-server.exe`
+on Windows and `build/bin/llama-server` on macOS. See [build.md](build.md) for other backends.
+
 Start a server as usual:
 
 ```bash
@@ -149,8 +173,8 @@ To find that number, collect the raw logits on a few hundred labelled examples w
 Typical values: about 3.6 for Gemma 4 12B, about 0.84 for Qwen3.5 2B — both bring the expected calibration
 error to roughly 0.03.
 
-A model fine-tuned for this task (GGUF metadata key `jev.temperature`) carries its own temperature and uses
-the fixed prompt format it was trained with; you do not need to pass anything.
+A model fine-tuned for this task can ship its temperature in the GGUF metadata key `jev.temperature`; it is
+then used by default and you do not need to pass anything.
 
 Other options:
 
@@ -160,6 +184,35 @@ Other options:
 | `temperature_scaling` | `true` | set to `false` to ignore the temperature entirely |
 | `permutations` | 1 | average over K rotations of the option order, to cancel position bias (costs K evaluations) |
 | `return_logits` | `false` | also return the raw label logits, for fitting a temperature |
+
+## Prompt format
+
+Each question becomes one user message, built like this and then wrapped in the model's own chat template
+(with an assistant generation prompt, thinking disabled):
+
+```
+Context:
+<state>
+
+Answer the question with only the label of the best option (the character before the colon), nothing else.
+Question: <instructions>
+Options:
+A: <first option>
+B: <second option>
+```
+
+The options are written as `name: description`, or just `name` when the description is `null`. A `noul`
+question becomes `yes` / `no` (plus your `criteria` text if you gave any), and a `score` question becomes its
+levels in order, lowest first. The labels `A`, `B`, ... are assigned per question, and only symbols that are a
+single token right after the generation prompt are used, so the answer is always exactly one token.
+
+That token is where the probabilities come from: the server evaluates the prompt once and reads the logits of
+the label tokens at that position.
+
+**If you fine-tune a model for this**, train it on this same format — the same wording, the same option
+layout, and one label character as the target — and the server will use it as is. You can also store the
+temperature you fitted in the GGUF metadata key `jev.temperature` so clients get calibrated probabilities
+without passing anything.
 
 ## Web UI
 
