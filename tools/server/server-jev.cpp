@@ -28,11 +28,12 @@ static bool jev_is_structured(const json & v) {
            (v.is_object() && !v.empty()) || (v.is_array() && !v.empty());
 }
 
-jev_request jev_parse_request(const json & body, size_t max_options) {
+jev_request jev_parse_request(const json & body, size_t max_options, const std::string & default_assistant_prefix) {
     if (!body.is_object()) {
         throw jev_error("invalid_request", "request body must be a JSON object");
     }
     jev_request req;
+    req.assistant_prefix = default_assistant_prefix;
 
     if (!body.contains("state") || !jev_is_structured(body.at("state"))) {
         throw jev_error("invalid_state", "state must be a non-empty string, object, or array", "state");
@@ -161,6 +162,7 @@ jev_request jev_parse_request(const json & body, size_t max_options) {
             }
             req.return_logits = o.at("return_logits").get<bool>();
         }
+        req.assistant_prefix = jev_parse_assistant_prefix(body, default_assistant_prefix);
         if (o.contains("permutations")) {
             const json & p = o.at("permutations");
             if (!p.is_number_integer() || p.get<int>() < 1 || p.get<int>() > 64) {
@@ -170,6 +172,20 @@ jev_request jev_parse_request(const json & body, size_t max_options) {
         }
     }
     return req;
+}
+
+std::string jev_parse_assistant_prefix(const json & body, const std::string & fallback) {
+    if (!body.is_object() || !body.contains("options") || !body.at("options").is_object()) {
+        return fallback;
+    }
+    const json & o = body.at("options");
+    if (!o.contains("assistant_prefix")) {
+        return fallback;
+    }
+    if (!o.at("assistant_prefix").is_string()) {
+        throw jev_error("invalid_options", "options.assistant_prefix must be a string", "options.assistant_prefix");
+    }
+    return o.at("assistant_prefix").get<std::string>();
 }
 
 const std::vector<std::string> & jev_label_candidates() {

@@ -48,6 +48,7 @@ struct jev_request {
     float temperature         = 0.0f;  // extension: "options": {"temperature": T} overrides the model's temperature (0 = not set)
     int   permutations        = 1;     // extension: "options": {"permutations": K} averages K cyclic option orders
     bool  return_logits       = false; // extension: "options": {"return_logits": true} adds the raw label logits to each answer
+    std::string assistant_prefix;      // extension: "options": {"assistant_prefix": "..."} appended after the generation prompt
 };
 
 // a label symbol and the token the model produces for it right after the generation prompt
@@ -56,8 +57,12 @@ struct jev_label {
     llama_token token;
 };
 
-// parse and validate the request body (throws jev_error)
-jev_request jev_parse_request(const json & body, size_t max_options);
+// parse and validate the request body (throws jev_error); default_assistant_prefix is used unless the request
+// sets its own
+jev_request jev_parse_request(const json & body, size_t max_options, const std::string & default_assistant_prefix);
+
+// "options": {"assistant_prefix": "..."} alone, needed before the labels (and thus max_options) are known
+std::string jev_parse_assistant_prefix(const json & body, const std::string & fallback);
 
 // candidate label symbols in the order they are assigned: A-Z, a-z, 0-9
 const std::vector<std::string> & jev_label_candidates();

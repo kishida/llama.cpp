@@ -26,7 +26,10 @@ struct server_context_meta {
     bool has_inp_video;
     json json_ui_settings;
     int slot_n_ctx;
+    int n_slots;
     enum llama_pooling_type pooling_type;
+    std::string jev_assistant_prefix;     // --jev-assistant-prefix, default for /v1/systemone
+    bool        jev_assistant_prefix_set; // whether --jev-assistant-prefix was given at all
 
     // chat params
     server_chat_params & chat_params;
@@ -183,12 +186,19 @@ private:
     server_response & queue_results;
     std::unique_ptr<server_res_generator> create_response(bool bypass_sleep = false);
 
-    // Jev: label symbols that are a single token right after the generation prompt (computed on first use)
+    // Jev: label symbols that are a single token right after the generation prompt, per assistant prefix
+    // (computed on first use)
     std::mutex             mutex_jev;
-    bool                   jev_labels_ready = false;
-    std::vector<jev_label> jev_labels;
-    std::vector<jev_label> get_jev_labels();
-    std::string            jev_prompt(const std::string & user_message) const;
+    std::map<std::string, std::vector<jev_label>> jev_labels;
+    std::atomic<uint32_t>  jev_slot_rr{0}; // round-robin, to keep one request's questions on one slot
+    bool                   jev_prefix_ready = false;
+    std::string            jev_prefix_auto;
+    std::vector<jev_label> get_jev_labels(const std::string & assistant_prefix);
+    std::string            jev_prompt(const std::string & user_message, const std::string & assistant_prefix) const;
+    // what the chat template writes between the generation prompt and the assistant's own words, if anything
+    std::string            jev_detect_assistant_prefix();
+    // --jev-assistant-prefix if given, else the detected one
+    std::string            jev_default_assistant_prefix();
 
     // cached responses, to be used during sleep
     std::mutex     mutex_cache;

@@ -3481,8 +3481,11 @@ private:
 
                     bool do_checkpoint = params_base.n_ctx_checkpoints > 0;
 
-                    // make checkpoints only for completion tasks
-                    do_checkpoint = do_checkpoint && slot.task->type == SERVER_TASK_TYPE_COMPLETION;
+                    // make checkpoints only for completion tasks, and for the label logits tasks of /v1/systemone
+                    // that carry images: there the questions share a prompt prefix that is costly to recompute
+                    do_checkpoint = do_checkpoint && (slot.task->type == SERVER_TASK_TYPE_COMPLETION ||
+                                                      (slot.task->type == SERVER_TASK_TYPE_LABEL_LOGITS &&
+                                                       slot.task->tokens.has_mtmd));
 
                     // make a checkpoint of the parts of the memory that cannot be rolled back.
                     // checkpoints are created only if:
@@ -4228,7 +4231,10 @@ server_context_meta server_context::get_meta() const {
         /* has_inp_video          */ impl->chat_params.allow_video,
         /* json_ui_settings       */ impl->json_ui_settings,
         /* slot_n_ctx             */ impl->n_ctx_slot(),
+        /* n_slots                */ impl->params_base.n_parallel,
         /* pooling_type           */ llama_pooling_type(impl->ctx_tgt),
+        /* jev_assistant_prefix   */ impl->params_base.jev_assistant_prefix,
+        /* jev_assistant_prefix_set */ impl->params_base.jev_assistant_prefix_set,
 
         /* chat_params            */ impl->chat_params,
         /* chat_template_caps     */ common_chat_templates_get_caps(impl->chat_params.tmpls.get()),
@@ -5278,11 +5284,12 @@ void server_routes::init_routes() {
         std::vector<jev_label> labels;
         jev_request jreq;
         try {
-            labels = get_jev_labels();
+            // the assistant prefix changes the tokenization, so the labels are resolved for it
+            labels = get_jev_labels(jev_parse_assistant_prefix(body, jev_default_assistant_prefix()));
             if (labels.size() < 2) {
                 throw std::runtime_error("the vocabulary has too few single-token label symbols");
             }
-            jreq = jev_parse_request(body, labels.size());
+            jreq = jev_parse_request(body, labels.size(), jev_default_assistant_prefix());
         } catch (const jev_error & e) {
             return send_jev_error(e);
         } catch (const std::exception & e) {
@@ -5331,7 +5338,7 @@ void server_routes::init_routes() {
                         for (size_t i = 0; i < n; i++) {
                             perm[i] = (int) ((i + shift) % n);
                         }
-                        const std::string prompt = jev_prompt(image_prefix + jev_user_message(jreq, q, labels, perm));
+                        const std::string prompt = jev_prompt(image_prefix + jev_user_message(jreq, q, labels, perm), jreq.assistant_prefix);
                         server_tokens tokens = files.empty()
                             ? std::move(tokenize_input_prompts(ctx_server.vocab, ctx_server.mctx, json(prompt), true, true, ctx_server.init_opt)[0])
                             : process_mtmd_prompt(ctx_server.mctx, prompt, files, ctx_server.init_opt);
@@ -5355,6 +5362,23 @@ void server_routes::init_routes() {
             } catch (const jev_error & e) {
                 return send_jev_error(e);
             }
+
+            // the questions share a prompt prefix; with images that prefix is expensive (the image has to be
+            // encoded), so run them on one slot, one after the other, and mark the end of the shared prefix so
+            // that a context checkpoint is taken there and the other questions can reuse it
+            if (!files.empty() && tasks.size() > 1) {
+                size_t lcp = tasks[0].tokens.size();
+                for (size_t i = 1; i < tasks.size(); i++) {
+                    lcp = std::min(lcp, tasks[0].tokens.get_common_prefix(tasks[i].tokens));
+                }
+                const int id_slot = meta->n_slots > 0 ? (int) (jev_slot_rr++ % (uint32_t) meta->n_slots) : 0;
+                for (auto & task : tasks) {
+                    task.id_slot = id_slot;
+                    task.params.message_spans.add(COMMON_CHAT_ROLE_USER, lcp, 0);
+                }
+                SRV_INF("jev: %zu tasks on slot %d, shared prefix = %zu tokens\n", tasks.size(), id_slot, lcp);
+            }
+
             rd.post_tasks(std::move(tasks));
         }
 
@@ -5730,7 +5754,7 @@ void server_routes::update_cached_responses(bool is_sleeping) {
 // Jev (/v1/systemone) helpers
 //
 
-std::string server_routes::jev_prompt(const std::string & user_message) const {
+std::string server_routes::jev_prompt(const std::string & user_message, const std::string & assistant_prefix) const {
     // the model's own chat template, with thinking disabled so that the answer label is the next token
     common_chat_templates_inputs inputs;
     common_chat_msg msg;
@@ -5742,17 +5766,81 @@ std::string server_routes::jev_prompt(const std::string & user_message) const {
     inputs.chat_template_kwargs  = meta->chat_params.chat_template_kwargs;
     inputs.chat_template_kwargs["enable_thinking"] = "false";
     inputs.enable_thinking       = false;
-    return common_chat_templates_apply(meta->chat_params.tmpls.get(), inputs).prompt;
+    // the prefix continues the assistant turn, e.g. "<|channel|>final<|message|>" for a harmony-style model
+    return common_chat_templates_apply(meta->chat_params.tmpls.get(), inputs).prompt + assistant_prefix;
 }
 
-std::vector<jev_label> server_routes::get_jev_labels() {
-    std::lock_guard<std::mutex> lock(mutex_jev);
-    if (jev_labels_ready) {
-        return jev_labels;
+// Some chat templates (harmony: gpt-oss, LLM-jp-4) expect the assistant turn to open with a channel marker,
+// so the token right after the generation prompt is that marker and not an answer label. Rendering the template
+// with an assistant message and diffing it against the generation prompt yields exactly what is missing.
+std::string server_routes::jev_detect_assistant_prefix() {
+    const std::string marker = "__JEV_ANSWER__";
+    const std::string gen    = jev_prompt("x", "");
+
+    common_chat_templates_inputs inputs;
+    common_chat_msg user;
+    user.role    = "user";
+    user.content = "x";
+    common_chat_msg assistant;
+    assistant.role    = "assistant";
+    assistant.content = marker;
+    inputs.messages              = {user, assistant};
+    inputs.add_generation_prompt = false;
+    inputs.use_jinja             = meta->chat_params.use_jinja;
+    inputs.chat_template_kwargs  = meta->chat_params.chat_template_kwargs;
+    inputs.chat_template_kwargs["enable_thinking"] = "false";
+    inputs.enable_thinking       = false;
+
+    std::string full;
+    try {
+        full = common_chat_templates_apply(meta->chat_params.tmpls.get(), inputs).prompt;
+    } catch (const std::exception &) {
+        return "";
     }
+
+    const size_t at = full.find(marker);
+    if (at == std::string::npos || full.compare(0, gen.size(), gen) != 0 || at < gen.size()) {
+        return "";
+    }
+    std::string prefix = full.substr(gen.size(), at - gen.size());
+    // the template may have closed and reopened the assistant turn (an empty analysis message, say): in that
+    // case only what follows the last assistant header is the prefix we want
+    for (size_t len = std::min<size_t>(gen.size(), 64); len > 3; len--) {
+        const std::string tail = gen.substr(gen.size() - len);
+        const size_t last = prefix.rfind(tail);
+        if (last != std::string::npos) {
+            prefix = prefix.substr(last + tail.size());
+            break;
+        }
+    }
+    return prefix.size() <= 128 ? prefix : "";
+}
+
+std::string server_routes::jev_default_assistant_prefix() {
+    if (meta->jev_assistant_prefix_set) {
+        return meta->jev_assistant_prefix;
+    }
+    std::lock_guard<std::mutex> lock(mutex_jev);
+    if (!jev_prefix_ready) {
+        jev_prefix_auto  = jev_detect_assistant_prefix();
+        jev_prefix_ready = true;
+        if (!jev_prefix_auto.empty()) {
+            SRV_INF("jev: assistant prefix detected from the chat template: \"%s\"\n", jev_prefix_auto.c_str());
+        }
+    }
+    return jev_prefix_auto;
+}
+
+std::vector<jev_label> server_routes::get_jev_labels(const std::string & assistant_prefix) {
+    std::lock_guard<std::mutex> lock(mutex_jev);
+    const auto it = jev_labels.find(assistant_prefix);
+    if (it != jev_labels.end()) {
+        return it->second;
+    }
+    std::vector<jev_label> labels;
     // a symbol is usable as a label if appending it to the generation prompt adds exactly one token
     // (this also handles tokenizers that add a leading space, e.g. SentencePiece "▁A" vs "A")
-    const std::string base = jev_prompt("x");
+    const std::string base = jev_prompt("x", assistant_prefix);
     const std::vector<llama_token> base_tokens = common_tokenize(ctx_server.vocab, base, true, true);
     std::set<llama_token> used;
     for (const auto & text : jev_label_candidates()) {
@@ -5763,9 +5851,10 @@ std::vector<jev_label> server_routes::get_jev_labels() {
         if (!used.insert(toks.back()).second) {
             continue;
         }
-        jev_labels.push_back({text, toks.back()});
+        labels.push_back({text, toks.back()});
     }
-    SRV_INF("jev: %zu single-token labels\n", jev_labels.size());
-    jev_labels_ready = true;
-    return jev_labels;
+    SRV_INF("jev: %zu single-token labels%s\n", labels.size(),
+            assistant_prefix.empty() ? "" : " (with assistant prefix)");
+    jev_labels[assistant_prefix] = labels;
+    return labels;
 }

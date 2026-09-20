@@ -3476,6 +3476,18 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_RERANKING"));
     add_opt(common_arg(
+        {"--jev-assistant-prefix"}, "TEXT",
+        "text that starts the assistant turn on the /v1/systemone endpoint, so that the answer label is the "
+        "next token (e.g. \"<think>\\n\\n</think>\\n\\n\"); escapes such as \\n are expanded; pass an empty string to "
+        "use none, a request may override it with options.assistant_prefix (default: detected from the chat "
+        "template)",
+        [](common_params & params, const std::string & value) {
+            params.jev_assistant_prefix     = value;
+            params.jev_assistant_prefix_set = true;
+            string_process_escapes(params.jev_assistant_prefix); // so that "\n" can be written on a command line
+        }
+    ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_JEV_ASSISTANT_PREFIX"));
+    add_opt(common_arg(
         {"--api-key"}, "KEY",
         "API key to use for authentication, multiple keys can be provided as a comma-separated list (default: none)",
         [](common_params & params, const std::string & value) {

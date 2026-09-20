@@ -637,6 +637,11 @@ struct common_params {
     std::string chat_template = "";                                                                         // NOLINT
     bool use_jinja = true;                                                                                  // NOLINT
 
+    // default for "options": {"assistant_prefix": ...} of /v1/systemone; when unset it is detected from the
+    // chat template (see docs/jev.md)
+    std::string jev_assistant_prefix = "";                                                                  // NOLINT
+    bool jev_assistant_prefix_set = false;
+
     // server CORS params
     std::string cors_origins = "*";
     std::string cors_methods = "GET, POST, DELETE, OPTIONS";

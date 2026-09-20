@@ -156,6 +156,11 @@ curl http://localhost:8080/v1/systemone -H "Content-Type: application/json" -d '
 Each entry of `images` is a `data:` URL, a bare base64 string, or an `http(s)://` URL. A server started
 without `--mmproj` answers with 422 `images_not_supported`.
 
+Encoding an image costs far more than answering a question about it, so all the questions of one request are
+run on a single slot, one after the other, and the work up to the end of the shared prefix — the images and
+the state — is done once and reused. Ask everything you want about a picture in one request: on Qwen3.5 2B,
+eight questions about one photo take 1.6 s instead of 4.6 s.
+
 ## Calibration
 
 The probabilities are only useful if they are honest: when the model says 0.8, it should be right about 80%
@@ -184,6 +189,7 @@ Other options:
 | `temperature_scaling` | `true` | set to `false` to ignore the temperature entirely |
 | `permutations` | 1 | average over K rotations of the option order, to cancel position bias (costs K evaluations) |
 | `return_logits` | `false` | also return the raw label logits, for fitting a temperature |
+| `assistant_prefix` | detected from the chat template | text appended after the generation prompt, to start the assistant turn (see below) |
 
 ## Prompt format
 
@@ -221,6 +227,30 @@ the request and response JSON. It picks up the loaded model from `/props` and of
 server was started with `--mmproj`. It is handy for trying prompts and options before wiring the API into
 anything — and for reading the request JSON it builds, which you can paste straight into `curl`.
 
+## When the label is not the next token
+
+Some models do not start their answer with the answer, and then the token after the generation prompt is not a
+label and the probabilities are meaningless. The server catches the common case by itself: it diffs the chat
+template rendered with an assistant message against the generation prompt, which finds the channel marker of a
+harmony-style model (gpt-oss, LLM-jp-4). Without it those two score like guessing; with it they are among the
+best models here. A line in the log says when one was found:
+
+```
+jev: assistant prefix detected from the chat template: "<|channel|>final<|message|>"
+```
+
+Detection only sees what the template writes. A model that opens a reasoning block on its own — LFM2.5 8B
+starts with `<think>` although its template does not — needs to be told, which also takes its accuracy on our
+benchmark from 0.50 to 0.59:
+
+```bash
+llama-server -m LFM2.5-8B-A1B.gguf -ngl 99 --jev-assistant-prefix "<think>\n\n</think>\n\n"
+```
+
+The text is appended after the generation prompt, with `\n` and the other usual escapes expanded. A request
+can override it per question set with
+`"options": {"assistant_prefix": "..."}`, and an empty string turns the detection off.
+
 ## Notes and limits
 
 - Options are labelled with single-token symbols (`A`-`Z`, `a`-`z`, `0`-`9`), so a question can have at most
@@ -228,3 +258,33 @@ anything — and for reading the request JSON it builds, which you can paste str
 - Longer option descriptions generally help; the label is just a handle.
 - `model` in the request is required by the API but ignored, except in router mode where it selects the model.
 - Nothing is generated, so `output_tokens` is always 0 and sampling parameters do not apply.
+
+## Reference: which models are worth using
+
+Numbers from one benchmark — 1,191 multiple-choice questions with 2 to 8 options, where always guessing gives
+0.283 — so read them as a rough ordering, not as a score for the model. The temperature was fitted on a
+separate 358-question split, and ECE is shown before and after applying it.
+
+| model | accuracy | ECE (T=1 → calibrated) | T | notes |
+|---|---|---|---|---|
+| Gemma 4 12B UD-Q4_K_XL | 0.897 | 0.092 → 0.030 | 3.60 | |
+| gpt-oss 20B MXFP4 | 0.840 | 0.059 → 0.025 | 1.53 | assistant prefix, detected |
+| LLM-jp-4 8B thinking Q4_K_M | 0.825 | 0.099 → 0.041 | 1.69 | assistant prefix, detected |
+| Qwen3.5 2B Q8_0 | 0.711 | 0.040 → 0.030 | 0.84 | calibrated as it comes |
+| Qwen3 1.7B Q8_0 | 0.712 | 0.270 → 0.038 | 8.56 | |
+| LFM2.5 8B A1B UD-Q4_K_XL | 0.591 | 0.246 → 0.048 | 2.70 | needs `--jev-assistant-prefix`; 0.496 without it |
+| LFM2.5 350M Q8_0 | 0.572 | 0.347 → 0.055 | 6.70 | |
+| gemma-3 270m-it Q8_0 | 0.287 | 0.341 → 0.032 | 13.44 | no better than guessing |
+| (guessing) | 0.283 | | | |
+
+What it suggests:
+
+- A small instruct model is enough to be useful, but not any small model: at 270M the answers are noise, and
+  a large temperature then only makes the model uniformly unsure rather than right.
+- Accuracy and calibration are separate problems. Qwen3.5 2B is honest out of the box (T = 0.84) while Qwen3
+  1.7B answers almost everything with near-certainty until it is divided by 8.6. Fit the temperature.
+- Check the assistant prefix before judging a model. gpt-oss and LLM-jp-4 look like random guessing without
+  one, and LFM2.5 8B needs a prefix the server cannot detect, because the model opens `<think>` on its own
+  rather than the template writing it.
+- Mixture-of-experts models are priced by their active parameters here too: LFM2.5 8B A1B activates about 1B
+  and scores like a small model.
