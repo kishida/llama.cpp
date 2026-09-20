@@ -262,33 +262,33 @@ can override it per question set with
 ## Reference: which models are worth using
 
 Numbers from one benchmark — 1,191 multiple-choice questions with 2 to 8 options, where always guessing gives
-0.283 — so read them as a rough ordering, not as a score for the model. All of them were measured in one run
-on the same machine (RTX 4060 Ti, `-ngl 99 -c 16384 -np 8`). The temperature was fitted on a separate
-358-question split, and ECE is shown before and after applying it. The time is the average of 50 sequential
-requests carrying one question each, so it is roughly the cost of a single classification; asking several
-questions about the same state in one request is much cheaper per question.
+0.283 — so read them as a rough ordering, not as a score for the model. All of them were measured on the same
+machine (RTX 4060 Ti, `-ngl 99 -c 16384 -np 8`) with `scripts/bench_models.py` of the Jev PoC. The temperature
+was fitted on a separate 358-question split, and ECE is shown before and after applying it. The time is the
+average of 50 sequential requests carrying one question each, so it is roughly the cost of a single
+classification; asking several questions about the same state in one request is much cheaper per question.
 
-| model | accuracy | ECE (T=1 → calibrated) | T | time / question | notes |
-|---|---|---|---|---|---|
-| Gemma 4 12B UD-Q4_K_XL | 0.891 | 0.098 → 0.034 | 3.59 | 154 ms | |
-| gpt-oss 20B MXFP4 | 0.842 | 0.061 → 0.027 | 1.54 | 183 ms | assistant prefix, detected |
-| LLM-jp-4 8B thinking Q4_K_M | 0.825 | 0.099 → 0.044 | 1.69 | 78 ms | assistant prefix, detected |
-| jwenv 1.7B poc Q8_0 | 0.804 | 0.095 → 0.033 | 1.58 | 51 ms | Qwen3 1.7B fine-tuned for this task |
-| Qwen3 1.7B Q8_0 | 0.713 | 0.271 → 0.034 | 8.57 | 55 ms | the model the above was trained from |
-| Qwen3.5 2B Q8_0 | 0.709 | 0.046 → 0.037 | 0.85 | 52 ms | calibrated as it comes |
-| jwenv 0.6B poc Q8_0 | 0.695 | 0.125 → 0.043 | 1.60 | 41 ms | Qwen3 0.6B fine-tuned for this task |
-| LFM2.5 8B A1B UD-Q4_K_XL | 0.587 | 0.249 → 0.044 | 2.67 | 60 ms | needs `--jev-assistant-prefix`; 0.496 without it |
-| LFM2.5 350M Q8_0 | 0.573 | 0.346 → 0.059 | 6.70 | 18 ms | |
-| Qwen3 0.6B Q8_0 | 0.513 | 0.349 → 0.055 | 6.60 | 42 ms | the model jwenv 0.6B was trained from |
-| gemma-3 270m-it Q8_0 | 0.288 | 0.343 → 0.043 | 12.06 | 22 ms | no better than guessing |
-| (guessing) | 0.283 | | | | |
+| model | quant | accuracy | ECE (T=1 → calibrated) | T | time / question | notes |
+|---|---|---|---|---|---|---|
+| Gemma 4 12B | UD-Q4_K_XL | 0.891 | 0.098 → 0.034 | 3.59 | 154 ms | |
+| gpt-oss 20B | MXFP4 | 0.842 | 0.061 → 0.027 | 1.54 | 183 ms | assistant prefix, detected |
+| LLM-jp-4 8B thinking | Q4_K_M | 0.825 | 0.099 → 0.044 | 1.69 | 78 ms | assistant prefix, detected |
+| jwenv 1.7B poc | Q8_0 | 0.804 | 0.095 → 0.033 | 1.58 | 51 ms | Qwen3 1.7B fine-tuned for this task |
+| Qwen3 1.7B | Q8_0 | 0.713 | 0.271 → 0.034 | 8.57 | 55 ms | the model the above was trained from |
+| jwenv 0.6B poc | Q8_0 | 0.695 | 0.125 → 0.043 | 1.60 | 41 ms | Qwen3 0.6B fine-tuned for this task |
+| LFM2.5 8B A1B | UD-Q4_K_XL | 0.587 | 0.249 → 0.044 | 2.67 | 60 ms | needs `--jev-assistant-prefix`; 0.496 without it |
+| LFM2.5 350M | Q8_0 | 0.573 | 0.346 → 0.059 | 6.70 | 18 ms | |
+| Qwen3 0.6B | Q8_0 | 0.513 | 0.349 → 0.055 | 6.60 | 42 ms | the model jwenv 0.6B was trained from |
+| gemma-3 270m-it | Q8_0 | 0.288 | 0.343 → 0.043 | 12.06 | 22 ms | no better than guessing |
+| (guessing) | | 0.283 | | | | |
 
 What it suggests:
 
 - A small instruct model is enough to be useful, but not any small model: at 270M the answers are noise, and
   a large temperature then only makes the model uniformly unsure rather than right.
-- Accuracy and calibration are separate problems. Qwen3.5 2B is honest out of the box (T = 0.85) while Qwen3
-  1.7B answers almost everything with near-certainty until it is divided by 8.6. Fit the temperature.
+- Accuracy and calibration are separate problems. Qwen3.5 is honest out of the box at every size (T between
+  0.85 and 1.6) while Qwen3 1.7B answers almost everything with near-certainty until it is divided by 8.6.
+  Fit the temperature.
 - Check the assistant prefix before judging a model. gpt-oss and LLM-jp-4 look like random guessing without
   one, and LFM2.5 8B needs a prefix the server cannot detect, because the model opens `<think>` on its own
   rather than the template writing it.
@@ -299,3 +299,33 @@ What it suggests:
   8.6 to about 1.6, so the raw probabilities are usable even before calibration.
 - Time is set by the model, not by the task — every row does the same single prompt evaluation. A tuned 1.7B
   answers three times faster than Gemma 4 12B and loses 0.09 accuracy; the 0.6B answers in 41 ms.
+
+### Size
+
+One family, four sizes (the quantization is whatever was at hand, so the smaller ones are if anything
+favoured):
+
+| model | quant | accuracy | ECE (T=1 → calibrated) | T | time / question |
+|---|---|---|---|---|---|
+| Qwen3.5 27B | UD-IQ3_XXS | 0.914 | 0.040 → 0.022 | 1.32 | 362 ms |
+| Qwen3.5 9B | UD-Q4_K_XL | 0.885 | 0.043 → 0.027 | 1.24 | 116 ms |
+| Qwen3.5 4B | Q4_K_M | 0.852 | 0.041 → 0.033 | 1.10 | 101 ms |
+| Qwen3.5 2B | Q8_0 | 0.709 | 0.046 → 0.037 | 0.85 | 52 ms |
+
+Most of the distance is covered by 4B: +0.143 over 2B, then +0.033 for 9B and +0.029 for 27B, while the time
+per question grows from 52 ms to 362 ms. Calibration barely moves — every size starts at an ECE around 0.04
+and a temperature near 1 — so what the larger models buy is the answer, not the honesty of it.
+
+### Generation
+
+Three generations at the same size, all three quantized as UD-IQ3_XXS:
+
+| model | accuracy | ECE (T=1 → calibrated) | T | time / question |
+|---|---|---|---|---|
+| Qwen3.5 27B | 0.914 | 0.040 → 0.022 | 1.32 | 362 ms |
+| Qwen3.6 27B | 0.919 | 0.033 → 0.022 | 1.59 | 355 ms |
+| Qwen3.8 27B | 0.914 | 0.037 → 0.021 | 1.55 | 343 ms |
+
+Within 0.005 of each other on 1,191 questions, which is noise. On this kind of task a newer generation of the
+same size brings nothing — pick by size, quantization and speed, and spend the effort on the temperature and
+the prompt instead.
