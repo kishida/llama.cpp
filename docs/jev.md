@@ -271,6 +271,8 @@ classification; asking several questions about the same state in one request is 
 | model | quant | accuracy | ECE (T=1 → calibrated) | T | time / question | notes |
 |---|---|---|---|---|---|---|
 | Gemma 4 12B | UD-Q4_K_XL | 0.891 | 0.098 → 0.034 | 3.59 | 154 ms | |
+| jwenv 4B poc | Q8_0 | 0.872 | 0.058 → 0.022 | 1.60 | 65 ms | Qwen3-4B-Instruct-2507 fine-tuned for this task |
+| jwenv 4B poc | Q4_K_M | 0.868 | 0.067 → 0.023 | 1.52 | 51 ms | the same, at 2.3 GB |
 | gpt-oss 20B | MXFP4 | 0.842 | 0.061 → 0.027 | 1.54 | 183 ms | assistant prefix, detected |
 | LLM-jp-4 8B thinking | Q4_K_M | 0.825 | 0.099 → 0.044 | 1.69 | 78 ms | assistant prefix, detected |
 | jwenv 1.7B poc | Q8_0 | 0.804 | 0.095 → 0.033 | 1.58 | 51 ms | Qwen3 1.7B fine-tuned for this task |
@@ -295,12 +297,46 @@ What it suggests:
 - Mixture-of-experts models are priced by their active parameters here too: LFM2.5 8B A1B activates about 1B
   and scores like a small model.
 - Fine-tuning pays off twice over, and a small model is where it shows: 0.6B goes from 0.513 to 0.695, past
-  the untouched 1.7B, and 1.7B goes from 0.713 to 0.804, close to an 8B. The temperature drops from 6.6 and
-  8.6 to about 1.6, so the raw probabilities are usable even before calibration.
+  the untouched 1.7B; 1.7B goes from 0.713 to 0.804; and 4B reaches 0.872, within 0.02 of a 12B. The
+  temperature drops from 6.6 and 8.6 to about 1.6, so the raw probabilities are usable even before
+  calibration, and the expected calibration error lands where the 27B models are.
 - Time is set by the model, not by the task — every row does the same single prompt evaluation. A tuned 1.7B
   answers three times faster than Gemma 4 12B and loses 0.09 accuracy; the 0.6B answers in 41 ms.
 
-### Size
+### Size on disk
+
+What a gigabyte of model buys, on the same benchmark. The fine-tuned models below are the three trained for
+this task; everything else is off the shelf.
+
+| model | quant | size | accuracy | ECE | time / question |
+|---|---|---|---|---|---|
+| jwenv 0.6B poc | Q4_K_M | 0.37 GB | 0.668 | 0.061 | |
+| jwenv 0.6B poc | Q8_0 | 0.60 GB | 0.695 | 0.043 | 41 ms |
+| jwenv 1.7B poc | Q4_K_M | 1.03 GB | 0.800 | 0.036 | |
+| jwenv 1.7B poc | Q8_0 | 1.71 GB | 0.804 | 0.033 | 51 ms |
+| **jwenv 4B poc** | **Q4_K_M** | **2.33 GB** | **0.868** | **0.023** | **51 ms** |
+| jwenv 4B poc | Q8_0 | 3.99 GB | 0.872 | 0.022 | 65 ms |
+| Qwen3.5 9B | UD-Q4_K_XL | 5.56 GB | 0.885 | 0.027 | 116 ms |
+| Gemma 4 12B | UD-Q4_K_XL | 6.86 GB | 0.891 | 0.034 | 154 ms |
+| Qwen3.6 27B | UD-IQ3_XXS | 11.17 GB | 0.919 | 0.022 | 355 ms |
+
+Below 5 GB every point on the frontier is a fine-tuned model, and 4B at Q4_K_M is the smallest one that
+reaches a usable 0.87. Going further costs a lot for a little: +0.017 needs 2.4× the size and 2.3× the time,
++0.051 needs 4.8× the size and 7× the time. Its calibration is already at the level of the 27B models, which
+matters here because the probabilities are the output.
+
+Quantization is close to free at this scale, and less so as the model shrinks:
+
+| model | Q8_0 | Q4_K_M | difference |
+|---|---|---|---|
+| jwenv 4B poc | 0.872 | 0.868 | -0.004 |
+| jwenv 1.7B poc | 0.798 | 0.800 | +0.002 |
+| jwenv 0.6B poc | 0.695 | 0.668 | -0.027 |
+
+Fit the temperature on the quantized file rather than copying it from the f16 one: the same model wants 1.60
+at Q8_0 and 1.52 at Q4_K_M.
+
+### Size within one family
 
 One family, four sizes (the quantization is whatever was at hand, so the smaller ones are if anything
 favoured):
