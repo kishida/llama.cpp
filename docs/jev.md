@@ -239,13 +239,31 @@ best models here. A line in the log says when one was found:
 jev: assistant prefix detected from the chat template: "<|channel|>final<|message|>"
 ```
 
-Detection only sees what the template writes. A model that opens a reasoning block on its own — LFM2.5 8B
-starts with `<think>` although its template does not — needs to be told, which also takes its accuracy on our
-benchmark from 0.50 to 0.59:
+Detection only sees what the template writes, and two shapes get past it. Both need the prefix spelled out.
+
+**The model opens a reasoning block on its own.** LFM2.5 8B starts with `<think>` although its template does
+not, so the prefix has to open and close one. Accuracy on our benchmark goes from 0.50 to 0.59:
 
 ```bash
 llama-server -m LFM2.5-8B-A1B.gguf -ngl 99 --jev-assistant-prefix "<think>\n\n</think>\n\n"
 ```
+
+**The template opens one and leaves it open.** GLM-5.3-Flash ends its generation prompt with
+`<|assistant|><think>`, so the next token is the first token of its reasoning, not an answer. Nothing is
+missing between the template and the assistant's words, so the diff finds nothing — what is needed is the
+closing tag. Accuracy goes from 0.541 to 0.917, and the expected calibration error from 0.102 to 0.012, the
+best of any model measured here:
+
+```bash
+llama-server -m GLM-5.3-Flash.gguf -ngl 99 --jev-assistant-prefix "\n</think>\n"
+```
+
+(GLM-5.3-Flash support is not upstream yet; these numbers come from a build of
+[#27754](https://github.com/ggml-org/llama.cpp/pull/27754).)
+
+If a model scores near chance with probabilities that barely move between questions, this is the first thing
+to check: send one prompt through `/completions` and look at what it generates first. A channel marker or a
+`<think>` means the labels are being read at the wrong position.
 
 The text is appended after the generation prompt, with `\n` and the other usual escapes expanded. A request
 can override it per question set with
@@ -273,6 +291,7 @@ classification; asking several questions about the same state in one request is 
 | Gemma 4 12B | UD-Q4_K_XL | 0.891 | 0.098 → 0.034 | 3.59 | 154 ms | |
 | jwenv 4B poc | Q8_0 | 0.872 | 0.058 → 0.022 | 1.60 | 65 ms | Qwen3-4B-Instruct-2507 fine-tuned for this task |
 | jwenv 4B poc | Q4_K_M | 0.868 | 0.067 → 0.023 | 1.52 | 51 ms | the same, at 2.3 GB |
+| GLM-5.3-Flash | UD-Q4_K_XL | 0.917 | 0.023 → 0.012 | 1.18 | 692 ms | needs `--jev-assistant-prefix "\n</think>\n"`; 0.541 without it |
 | gpt-oss 20B | MXFP4 | 0.842 | 0.061 → 0.027 | 1.54 | 183 ms | assistant prefix, detected |
 | LLM-jp-4 8B thinking | Q4_K_M | 0.825 | 0.099 → 0.044 | 1.69 | 78 ms | assistant prefix, detected |
 | jwenv 1.7B poc | Q8_0 | 0.804 | 0.095 → 0.033 | 1.58 | 51 ms | Qwen3 1.7B fine-tuned for this task |
