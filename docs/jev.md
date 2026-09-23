@@ -290,6 +290,7 @@ several questions about the same state in one request is much cheaper per questi
 | model | quant | accuracy | ECE (T=1 → calibrated) | T | time / question | notes |
 |---|---|---|---|---|---|---|
 | Qwen3.8 Flash-Next | UD-Q4_K_XL | 0.944 | 0.023 → 0.015 | 1.26 | 292 ms | Mac |
+| Gemma 4 31B it qat | UD-Q4_K_XL | 0.935 | 0.055 → 0.021 | 3.63 | 418 ms | Mac |
 | Qwen3.6 27B | UD-Q4_K_XL | 0.923 | 0.030 → 0.013 | 1.40 | 403 ms | Mac |
 | Qwen3.8 27B | UD-Q4_K_XL | 0.919 | 0.029 → 0.017 | 1.37 | — | Mac; time not measured |
 | GLM-5.3-Flash | UD-Q4_K_XL | 0.917 | 0.023 → 0.012 | 1.18 | 692 ms | Mac; needs `--jev-assistant-prefix "\n</think>\n"`; 0.541 without it |
@@ -322,9 +323,10 @@ What it suggests:
 - Accuracy and calibration are separate problems. Qwen3.5 is honest out of the box at every size (T between
   0.85 and 1.6) while Qwen3 1.7B answers almost everything with near-certainty until it is divided by 8.6.
   Fit the temperature.
-- Overconfidence is a property of the generation, not of the size. Across Qwen3 the temperature falls as the
-  model grows — 6.6 at 0.6B, 8.6 at 1.7B, 5.5 at 14B, 3.5 at 32B — but never reaches the 0.85 to 1.6 that
-  every Qwen3.5 and later model sits in. A newer small model needs less correction than an older large one.
+- Overconfidence is a family trait, not a function of size. Across Qwen3 the temperature falls as the model
+  grows — 6.6 at 0.6B, 8.6 at 1.7B, 5.5 at 14B, 3.5 at 32B — but never reaches the 0.85 to 1.6 that every
+  Qwen3.5 and later model sits in. Gemma 4 does not move at all: 3.59 at 12B, 3.63 at 31B, for 0.044 more
+  accuracy. Fit the temperature per model, and expect the number to say more about the family than the size.
 - Check the assistant prefix before judging a model. gpt-oss and LLM-jp-4 look like random guessing without
   one, and LFM2.5 8B needs a prefix the server cannot detect, because the model opens `<think>` on its own
   rather than the template writing it.
