@@ -293,8 +293,9 @@ several questions about the same state in one request is much cheaper per questi
 | Qwen3.6 27B | UD-Q4_K_XL | 0.923 | 0.030 → 0.013 | 1.40 | 403 ms | Mac |
 | Qwen3.8 27B | UD-Q4_K_XL | 0.919 | 0.029 → 0.017 | 1.37 | — | Mac; time not measured |
 | GLM-5.3-Flash | UD-Q4_K_XL | 0.917 | 0.023 → 0.012 | 1.18 | 692 ms | Mac; needs `--jev-assistant-prefix "\n</think>\n"`; 0.541 without it |
+| Qwen3.6 35B A3B | UD-Q4_K_XL | 0.915 | 0.044 → 0.027 | 1.46 | 101 ms | Mac; mixture of experts, 3B active |
 | DeepSeek V4 Flash-Vision | UD-Q4_K_XL | 0.914 | 0.069 → 0.024 | 2.80 | 1213 ms | Mac |
-| Qwen3.6 35B A3B | UD-IQ2_M | 0.913 | 0.043 → 0.022 | 1.38 | 187 ms | mixture of experts, 3B active |
+| Qwen3 32B | Q4_K_M | 0.900 | 0.078 → 0.024 | 3.53 | 412 ms | Mac |
 | Gemma 4 12B | UD-Q4_K_XL | 0.891 | 0.098 → 0.034 | 3.59 | 154 ms |  |
 | Muse-Glimmer 30B | UD-Q4_K_XL | 0.884 | 0.036 → 0.021 | 0.84 | 468 ms | Mac; assistant prefix, detected |
 | Qwen3 14B | Q4_K_M | 0.881 | 0.110 → 0.025 | 5.46 | 145 ms |  |
@@ -321,11 +322,14 @@ What it suggests:
 - Accuracy and calibration are separate problems. Qwen3.5 is honest out of the box at every size (T between
   0.85 and 1.6) while Qwen3 1.7B answers almost everything with near-certainty until it is divided by 8.6.
   Fit the temperature.
+- Overconfidence is a property of the generation, not of the size. Across Qwen3 the temperature falls as the
+  model grows — 6.6 at 0.6B, 8.6 at 1.7B, 5.5 at 14B, 3.5 at 32B — but never reaches the 0.85 to 1.6 that
+  every Qwen3.5 and later model sits in. A newer small model needs less correction than an older large one.
 - Check the assistant prefix before judging a model. gpt-oss and LLM-jp-4 look like random guessing without
   one, and LFM2.5 8B needs a prefix the server cannot detect, because the model opens `<think>` on its own
   rather than the template writing it.
 - Mixture of experts is not a shortcut by itself: LFM2.5 8B A1B activates about 1B and scores like a small
-  model, while Qwen3.6 35B A3B activates 3B and reaches 0.913. Judge one by its benchmark row, not by either
+  model, while Qwen3.6 35B A3B activates 3B and reaches 0.915. Judge one by its benchmark row, not by either
   parameter count.
 - Fine-tuning pays off twice over, and a small model is where it shows: 0.6B goes from 0.513 to 0.695, past
   the untouched 1.7B; 1.7B goes from 0.713 to 0.804; and 4B reaches 0.872, within 0.02 of a 12B. The
