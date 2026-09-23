@@ -232,8 +232,8 @@ anything — and for reading the request JSON it builds, which you can paste str
 Some models do not start their answer with the answer, and then the token after the generation prompt is not a
 label and the probabilities are meaningless. The server catches the common case by itself: it diffs the chat
 template rendered with an assistant message against the generation prompt, which finds the channel marker of a
-harmony-style model (gpt-oss, LLM-jp-4). Without it those two score like guessing; with it they are among the
-best models here. A line in the log says when one was found:
+harmony-style model (gpt-oss, LLM-jp-4, Muse-Glimmer). Without it they score like guessing; with it they
+are among the best models here. A line in the log says when one was found:
 
 ```
 jev: assistant prefix detected from the chat template: "<|channel|>final<|message|>"
@@ -289,6 +289,7 @@ classification; asking several questions about the same state in one request is 
 | model | quant | accuracy | ECE (T=1 → calibrated) | T | time / question | notes |
 |---|---|---|---|---|---|---|
 | Gemma 4 12B | UD-Q4_K_XL | 0.891 | 0.098 → 0.034 | 3.59 | 154 ms | |
+| Muse-Glimmer 30B | UD-Q4_K_XL | 0.884 | 0.036 → 0.021 | 0.84 | 468 ms | assistant prefix, detected |
 | jwenv 4B poc | Q8_0 | 0.872 | 0.058 → 0.022 | 1.60 | 65 ms | Qwen3-4B-Instruct-2507 fine-tuned for this task |
 | jwenv 4B poc | Q4_K_M | 0.868 | 0.067 → 0.023 | 1.52 | 51 ms | the same, at 2.3 GB |
 | GLM-5.3-Flash | UD-Q4_K_XL | 0.917 | 0.023 → 0.012 | 1.18 | 692 ms | needs `--jev-assistant-prefix "\n</think>\n"`; 0.541 without it |
