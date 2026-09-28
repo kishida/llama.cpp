@@ -296,6 +296,7 @@ several questions about the same state in one request is much cheaper per questi
 | GLM-5.3-Flash | UD-Q4_K_XL | 0.917 | 0.023 → 0.012 | 1.18 | 692 ms | Mac; needs `--jev-assistant-prefix "\n</think>\n"`; 0.541 without it |
 | Qwen3.6 35B A3B | UD-Q4_K_XL | 0.915 | 0.044 → 0.027 | 1.46 | 101 ms | Mac; mixture of experts, 3B active |
 | DeepSeek V4 Flash-Vision | UD-Q4_K_XL | 0.914 | 0.069 → 0.024 | 2.80 | 1213 ms | Mac |
+| Gemma 4 26B A4B it qat | UD-Q4_K_XL | 0.913 | 0.058 → 0.016 | 2.49 | 92 ms | Mac; mixture of experts, 4B active |
 | Qwen3 32B | Q4_K_M | 0.900 | 0.078 → 0.024 | 3.53 | 412 ms | Mac |
 | Gemma 4 12B | UD-Q4_K_XL | 0.891 | 0.098 → 0.034 | 3.59 | 154 ms |  |
 | Muse-Glimmer 30B | UD-Q4_K_XL | 0.884 | 0.036 → 0.021 | 0.84 | 468 ms | Mac; assistant prefix, detected |
@@ -303,6 +304,8 @@ several questions about the same state in one request is much cheaper per questi
 | jwenv 4B poc | Q8_0 | 0.872 | 0.058 → 0.022 | 1.60 | 65 ms | Qwen3-4B-Instruct-2507 fine-tuned for this task |
 | jwenv 4B poc | Q4_K_M | 0.868 | 0.067 → 0.023 | 1.52 | 51 ms | the same, at 2.3 GB |
 | gpt-oss 20B | MXFP4 | 0.842 | 0.061 → 0.027 | 1.54 | 183 ms | assistant prefix, detected |
+| Qwen3 8B | Q4_K_M | 0.838 | 0.147 → 0.031 | 7.00 | 71 ms |  |
+| Qwen3-4B-Instruct-2507 | Q4_K_M | 0.831 | 0.096 → 0.043 | 1.77 | 60 ms | the model jwenv 4B was trained from |
 | LLM-jp-4 8B thinking | Q4_K_M | 0.825 | 0.099 → 0.044 | 1.69 | 78 ms | assistant prefix, detected |
 | jwenv 1.7B poc | Q8_0 | 0.804 | 0.095 → 0.033 | 1.58 | 51 ms | Qwen3 1.7B fine-tuned for this task |
 | Qwen3 1.7B | Q8_0 | 0.713 | 0.271 → 0.034 | 8.57 | 55 ms | the model the above was trained from |
@@ -323,16 +326,19 @@ What it suggests:
 - Accuracy and calibration are separate problems. Qwen3.5 is honest out of the box at every size (T between
   0.85 and 1.6) while Qwen3 1.7B answers almost everything with near-certainty until it is divided by 8.6.
   Fit the temperature.
-- Overconfidence is a family trait, not a function of size. Across Qwen3 the temperature falls as the model
-  grows — 6.6 at 0.6B, 8.6 at 1.7B, 5.5 at 14B, 3.5 at 32B — but never reaches the 0.85 to 1.6 that every
-  Qwen3.5 and later model sits in. Gemma 4 does not move at all: 3.59 at 12B, 3.63 at 31B, for 0.044 more
-  accuracy. Fit the temperature per model, and expect the number to say more about the family than the size.
+- Overconfidence travels with the model, not with its size. Within the thinking-capable Qwen3 models the
+  temperature falls as they grow — 6.6 at 0.6B, 8.6 at 1.7B, 7.0 at 8B, 5.5 at 14B, 3.5 at 32B — without ever
+  reaching the 0.85 to 1.6 that every Qwen3.5 and later model sits in. Gemma 4 does not move at all: 3.59 at
+  12B, 3.63 at 31B, for 0.044 more accuracy. But Qwen3-4B-Instruct-2507, from the same generation, needs only
+  1.77 — the variants without a thinking mode are the honest ones. Fit the temperature per model, and do not
+  read it off the parameter count.
 - Check the assistant prefix before judging a model. gpt-oss and LLM-jp-4 look like random guessing without
   one, and LFM2.5 8B needs a prefix the server cannot detect, because the model opens `<think>` on its own
   rather than the template writing it.
 - Mixture of experts is not a shortcut by itself: LFM2.5 8B A1B activates about 1B and scores like a small
-  model, while Qwen3.6 35B A3B activates 3B and reaches 0.915. Judge one by its benchmark row, not by either
-  parameter count.
+  model, while Qwen3.6 35B A3B activates 3B and reaches 0.915 and Gemma 4 26B A4B activates 4B and reaches
+  0.913 — the two fastest rows in the table at 101 ms and 92 ms. Judge one by its benchmark row, not by
+  either parameter count.
 - Fine-tuning pays off twice over, and a small model is where it shows: 0.6B goes from 0.513 to 0.695, past
   the untouched 1.7B; 1.7B goes from 0.713 to 0.804; and 4B reaches 0.872, within 0.02 of a 12B. The
   temperature drops from 6.6 and 8.6 to about 1.6, so the raw probabilities are usable even before
