@@ -258,8 +258,9 @@ best of any model measured here:
 llama-server -m GLM-5.3-Flash.gguf -ngl 99 --jev-assistant-prefix "\n</think>\n"
 ```
 
-(GLM-5.3-Flash support is not upstream yet; these numbers come from a build of
-[#27754](https://github.com/ggml-org/llama.cpp/pull/27754).)
+(GLM-5.3-Flash support landed upstream in
+[#27773](https://github.com/ggml-org/llama.cpp/pull/27773); the numbers below predate the merge and come from
+a build of the pull request.)
 
 If a model scores near chance with probabilities that barely move between questions, this is the first thing
 to check: send one prompt through `/completions` and look at what it generates first. A channel marker or a
