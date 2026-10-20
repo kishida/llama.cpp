@@ -1432,6 +1432,20 @@ struct llama_model_deepseek41 : public llama_model_deepseek4 {
                 llm_graph_input_dsv4 * inp_dsv4,
                 ggml_tensor * cur,
                 ggml_tensor * inp_pos,
+                ggml_tensor * & top_k_carry,
+                int il) const;
+
+        bool dsv41_use_gather(int64_t nt, const ggml_tensor * comp_k) const;
+
+        ggml_tensor * build_attention_gather(
+                ggml_tensor * q,
+                ggml_tensor * raw_k,
+                ggml_tensor * comp_k,
+                ggml_tensor * raw_mask,
+                ggml_tensor * comp_mask,
+                ggml_tensor * top_k,
+                ggml_tensor * sinks,
+                float kq_scale,
                 int il) const;
     };
 

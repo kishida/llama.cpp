@@ -589,6 +589,88 @@ ggml_tensor * llama_model_deepseek41::graph::build_indexer_top_k(
     return top_k;
 }
 
+// The gathered form builds one attention per token, so it only pays off for the few tokens of a
+// decode step (one, or a DSpark verification block). Prefill keeps the masked form.
+static constexpr int64_t DSV41_GATHER_MAX_TOKENS = 8;
+static constexpr int64_t DSV41_GATHER_KV_PAD     = 256;
+
+bool llama_model_deepseek41::graph::dsv41_use_gather(int64_t nt, const ggml_tensor * comp_k) const {
+    static const bool enabled = [] {
+        const char * env = getenv("LLAMA_DSV41_GATHER");
+        return env == nullptr || atoi(env) != 0;
+    }();
+    // one stream and one KV head: the selected rows index a single sequence's compressed cache
+    return enabled && nt <= DSV41_GATHER_MAX_TOKENS && comp_k->ne[1] == 1 && comp_k->ne[3] == 1;
+}
+
+// Attention over the raw window plus the compressed rows top_k selected, built per token: each
+// token picked its own rows, and flash attention takes one K for all of its queries. Only the
+// window and index_topk rows are touched, so the cost no longer depends on the context length.
+ggml_tensor * llama_model_deepseek41::graph::build_attention_gather(
+        ggml_tensor * q,
+        ggml_tensor * raw_k,
+        ggml_tensor * comp_k,
+        ggml_tensor * raw_mask,
+        ggml_tensor * comp_mask,
+        ggml_tensor * top_k,
+        ggml_tensor * sinks,
+        float kq_scale,
+        int il) const {
+    const int64_t nt      = q->ne[2];
+    const int64_t n_embd  = comp_k->ne[0];
+    const int64_t n_comp  = comp_k->ne[2];
+    const int64_t n_top_k = top_k->ne[0];
+
+    GGML_ASSERT(top_k->type == GGML_TYPE_I32);
+    GGML_ASSERT(top_k->ne[1] == nt);
+    GGML_ASSERT(raw_mask->ne[1] >= nt && comp_mask->ne[1] >= nt);
+
+    // compressed rows as a plain [n_embd, n_comp] matrix, so get_rows picks whole rows
+    ggml_tensor * comp_rows = ggml_view_2d(ctx0, comp_k, n_embd, n_comp, comp_k->nb[2], 0);
+
+    // flash attention kernels want the KV length padded (CUDA needs a multiple of 256 to keep its
+    // 512-wide heads on the GPU), so the selection is padded with zero rows that are masked out
+    const int64_t n_raw   = raw_k->ne[2];
+    const int64_t n_sel   = GGML_PAD(n_raw + n_top_k, DSV41_GATHER_KV_PAD) - n_raw;
+    const int64_t n_pad   = n_sel - n_top_k;
+
+    ggml_tensor * out = nullptr;
+    for (int64_t t = 0; t < nt; ++t) {
+        ggml_tensor * idx = ggml_view_1d(ctx0, top_k, n_top_k, t*top_k->nb[1]);
+
+        // get_rows yields F32 whatever the cache type; pad there, since pad is F32 only on CUDA
+        ggml_tensor * sel_k = ggml_get_rows(ctx0, comp_rows, idx);
+        if (n_pad > 0) {
+            sel_k = ggml_pad(ctx0, sel_k, 0, n_pad, 0, 0);
+        }
+        sel_k = ggml_cast(ctx0, sel_k, raw_k->type);
+        sel_k = ggml_reshape_4d(ctx0, sel_k, n_embd, 1, n_sel, 1);
+
+        // the selection can include rows this token may not see (fewer valid rows than
+        // index_topk), so their mask values come along with them
+        ggml_tensor * comp_mask_t = ggml_view_2d(ctx0, comp_mask, 1, n_comp, comp_mask->nb[0], t*comp_mask->nb[1]);
+        ggml_tensor * sel_mask = ggml_reshape_2d(ctx0, ggml_get_rows(ctx0, comp_mask_t, idx), n_top_k, 1);
+        if (n_pad > 0) {
+            ggml_tensor * pad_mask = ggml_fill(ctx0, ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_pad, 1), -INFINITY);
+            sel_mask = ggml_concat(ctx0, sel_mask, pad_mask, 0);
+        }
+        sel_mask = ggml_cast(ctx0, sel_mask, raw_mask->type);
+
+        ggml_tensor * raw_mask_t = ggml_view_2d(ctx0, raw_mask, raw_mask->ne[0], 1, raw_mask->nb[1], t*raw_mask->nb[1]);
+
+        ggml_tensor * k_t    = ggml_concat(ctx0, raw_k, sel_k, 2);
+        ggml_tensor * mask_t = ggml_concat(ctx0, raw_mask_t, sel_mask, 0);
+        cb(k_t, "k_sel", il);
+
+        ggml_tensor * q_t = ggml_view_3d(ctx0, q, q->ne[0], q->ne[1], 1, q->nb[1], q->nb[2], t*q->nb[2]);
+
+        ggml_tensor * out_t = build_attn_mha(q_t, k_t, k_t, nullptr, mask_t, sinks, nullptr, 0, kq_scale, il);
+        out = out ? ggml_concat(ctx0, out, out_t, 1) : out_t;
+    }
+
+    return out;
+}
+
 // DeepSeek-V4.1 attention: a sliding window of raw KV, plus, where the layer uses one, the
 // compressed positions the indexer picked, concatenated into a single masked attention.
 //
@@ -599,6 +681,7 @@ ggml_tensor * llama_model_deepseek41::graph::build_attention_v41(
         llm_graph_input_dsv4 * inp_dsv4,
         ggml_tensor * cur,
         ggml_tensor * inp_pos,
+        ggml_tensor * & top_k_carry,
         int il) const {
     const auto & layer = model.layers[il];
     llm_graph_input_dsv4_raw * inp_attn = inp_dsv4->get_raw();
@@ -745,11 +828,15 @@ ggml_tensor * llama_model_deepseek41::graph::build_attention_v41(
                     ctx0, persist_score, inp_comp.state_persist_dst_idxs, il));
     }
 
-    // an index source picks the positions; the layers in between reuse what it picked
-    ggml_tensor * top_k = nullptr;
+    // an index source picks the positions; the layers after it, up to the next source, reuse what
+    // it picked. Without the carry a reusing layer would fall back to the full causal mask and
+    // attend to every compressed row, which matches the reference only while a source holds at
+    // most index_topk rows.
     if (hparams.dsv41_is_index_source(il)) {
-        top_k = build_indexer_top_k(model, inp_dsv4, inp_comp, qr, cur, inp_pos, il);
+        top_k_carry = build_indexer_top_k(model, inp_dsv4, inp_comp, qr, cur, inp_pos, il);
     }
+    GGML_ASSERT(top_k_carry && "a compressed layer needs the top-k of an earlier index source");
+    ggml_tensor * top_k = top_k_carry;
 
     ggml_tensor * k_rot = inp_attn->self_k_rot;
     if (k_rot) {
@@ -778,10 +865,25 @@ ggml_tensor * llama_model_deepseek41::graph::build_attention_v41(
             comp_k->nb[1], comp_k->nb[2], comp_k->nb[3], 0);
     cb(comp_k, "comp_k", il);
 
+    ggml_tensor * raw_mask  = inp_attn->get_kq_mask();
+
+    // Decode: gather the index_topk selected compressed rows per token and attend to the window plus
+    // those rows. The masked form below concatenates every compressed row into a fresh K each step,
+    // which costs a copy of the whole compressed cache per layer per token and grows with context.
+    if (dsv41_use_gather(nt, comp_k)) {
+        out = build_attention_gather(q, raw_k, comp_k, raw_mask, inp_comp.kq_mask, top_k,
+                layer.attn_sinks, kq_scale, il);
+        if (k_rot) {
+            out = llama_mul_mat_hadamard(ctx0, out, k_rot);
+        }
+        cb(out, "attn_out_raw", il);
+
+        return build_attention_tail(model, out, inp_pos, nt, il);
+    }
+
     ggml_tensor * k_all = ggml_concat(ctx0, raw_k, comp_k, 2);
     cb(k_all, "k_all", il);
 
-    ggml_tensor * raw_mask  = inp_attn->get_kq_mask();
     ggml_tensor * comp_mask = top_k
         ? build_top_k_mask(inp_comp.kq_mask, top_k, "comp_top_k_mask", il)
         : inp_comp.kq_mask;
@@ -828,6 +930,9 @@ llama_model_deepseek41::graph::graph(const llama_model & model, const llm_graph_
             ggml_fill(ctx0, ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, hc - 1, n_tokens), 0.0f), 0);
     cb(pre_mix, "hc_pre_init", -1);
 
+    // the positions picked by the most recent index source, reused by the layers that follow it
+    ggml_tensor * top_k_carry = nullptr;
+
     for (int il = 0; il < n_layer; ++il) {
         if ((size_t) il < cparams.embeddings_layer_inp.size() && cparams.embeddings_layer_inp[il]) {
             res->t_layer_inp[il] = dsv41_hc_mean(ctx0, inpL);
@@ -859,7 +964,7 @@ llama_model_deepseek41::graph::graph(const llama_model & model, const llm_graph_
         cur = build_norm(cur, model.layers[il].attn_norm, nullptr, LLM_NORM_RMS, il);
         cb(cur, "attn_norm", il);
 
-        cur = build_attention_v41(model, inp_dsv4, cur, inp_pos, il);
+        cur = build_attention_v41(model, inp_dsv4, cur, inp_pos, top_k_carry, il);
 
         inpL = build_hc_post(cur, residual, post, comb, il);
         cb(inpL, "hc_attn_post", il);
